@@ -44,6 +44,46 @@ export const PRAZOS_PADRAO: Prazos = {
   analise_humana: 24,
   aprovado: 72,
   aprovado_avalista: 72,
+  aguardando_assinatura: 72,
+  // inicialização (item 11) — "agendado" e "carga conferida" vencem na data marcada com a cliente
+  inic_aguardando_agendamento: 48,
+  inic_montagem: 48,
+  inic_aguardando_pagamento: 72,
+  inic_expedicao: 24,
+  inic_em_transporte: 240,
+};
+
+// Modelos do contrato e da promissória (item 9). Provisórios até a Clara mandar os oficiais.
+export type Modelos = { valorPadrao: number; contrato: string; promissoria: string };
+export const MODELOS_PADRAO: Modelos = {
+  valorPadrao: 3000,
+  contrato: `CONTRATO DE REVENDA DE MERCADORIAS EM CONSIGNAÇÃO
+[MODELO PROVISÓRIO — substituir pelo contrato oficial da Clara Ferreira Acessórios]
+
+CONSIGNANTE: Clara Ferreira Acessórios.
+CONSIGNATÁRIA (REVENDEDORA): {{nome}}, CPF {{cpf}}, residente em {{endereco}}.
+
+1. A CONSIGNANTE entrega à REVENDEDORA mercadorias (semijoias e acessórios) em consignação, para revenda, até o limite de {{valor}}.
+2. A REVENDEDORA se compromete a prestar contas das peças vendidas e devolver as não vendidas no fechamento combinado.
+3. A REVENDEDORA responde pelas peças sob sua guarda, inclusive em caso de perda, extravio ou dano.
+4. Como garantia, a REVENDEDORA emite nota promissória no valor de {{valor}}{{texto_avalista}}.
+5. A primeira carga será entregue na modalidade {{modalidade}}.
+
+{{cidade}}, {{data}}.
+
+Cadastro {{codigo}}`,
+  promissoria: `NOTA PROMISSÓRIA
+[MODELO PROVISÓRIO — substituir pelo modelo oficial]
+
+Valor: {{valor}}
+Vencimento: à vista (na apresentação)
+
+Pagarei por esta única via de NOTA PROMISSÓRIA a Clara Ferreira Acessórios, ou à sua ordem, a quantia de {{valor_extenso}} ({{valor}}), em moeda corrente.
+
+Emitente: {{nome}} — CPF {{cpf}}
+Endereço: {{endereco}}
+{{linha_avalista}}
+{{cidade}}, {{data}}.`,
 };
 
 export type Integracao ={ apiKey?: string; webhookUrl?: string; webhookSecret?: string };
@@ -73,4 +113,5 @@ export async function setSetting(key: string, value: unknown) {
 export const getRegras = () => getSetting<Regras>('regras', REGRAS_PADRAO);
 export const getPrazos = () => getSetting<Prazos>('prazos', PRAZOS_PADRAO);
 export const getIntegracao =() => getSetting<Integracao>('integracao', {});
-export const getCenarios = () => getSetting<Record<string, CenarioSpc>>('spc_cenarios', CENARIOS_PADRAO);
+export const getModelos = () => getSetting<Modelos>('modelos', MODELOS_PADRAO);
+export const getCenarios =() => getSetting<Record<string, CenarioSpc>>('spc_cenarios', CENARIOS_PADRAO);

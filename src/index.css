@@ -49,5 +49,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--t
 
 .linha-atencao:hover { background: #fbf4f6 !important; }
 .etapa:hover > div:first-child { filter: saturate(1.4) brightness(.97); }
+@media (max-width: 1350px) { .caminho { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 20px !important; } .caminho .etapa:nth-child(4n) svg { display: none; } }
 @media (max-width: 760px) { .caminho { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; row-gap: 18px !important; } .caminho svg { display: none; } }
 @media (max-width: 640px) { .numeros { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; } .numeros > div:first-child { grid-column: 1 / -1; } }
+/* inicialização: no celular as colunas viram lista corrida */
+@media (max-width: 760px) { .kanban { grid-template-columns: 1fr !important; } }
+/* página de assinatura: imprimir só o contrato e a promissória */
+@media print { .nao-imprimir { display: none !important; } body { background: #fff !important; } }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Copy, Plus, Search } from 'lucide-react'
 import { api } from '../lib/api'
-import { ORDEM, STATUS } from '../lib/status'
+import { FINAIS, ORDEM, STATUS } from '../lib/status'
 import { cpfFmt, desde, telFmt } from '../lib/fmt'
 import { Modal, btn, inputStyle, labelStyle } from '../components/ui'
 import { Carregando, PageHeader, Prazo, StatusPill, toast, vazio } from '../components/extra'
@@ -66,7 +66,7 @@ export default function Cadastros() {
                     <td>{l.origem || '—'}</td>
                     <td><StatusPill status={l.status} />{l.motivo && <div title={l.motivo} style={{ fontSize: 12, color: 'var(--muted)', maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>{l.motivo}</div>}</td>
                     <td style={{ whiteSpace: 'nowrap', color: 'var(--muted)' }}>{desde(l.etapaEntradaEm)}</td>
-                    <td><Prazo prazo={['reprovado', 'desistencia', 'documentos_ok'].includes(l.status) ? null : l.prazoEtapa} /></td>
+                    <td><Prazo prazo={FINAIS.includes(l.status) ? null : l.prazoEtapa} /></td>
                     <td>{l.responsavel || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                     <td>{l.pendencias > 0 ? <span style={{ background: '#fde2e1', color: '#b42318', fontWeight: 700, padding: '1px 7px', borderRadius: 9, fontSize: 12 }}>{l.pendencias}</span> : ''}</td>
                   </tr>

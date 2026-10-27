@@ -1,11 +1,11 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { CheckCircle2, Upload } from 'lucide-react'
+import { CalendarClock, CheckCircle2, FileSignature, Truck, Upload } from 'lucide-react'
 import { api } from '../lib/api'
 import { ClaraLogo } from '../components/extra'
 
 // O que a cliente abre pelo link do WhatsApp (sem login, pensado pro celular). O mesmo link
-// muda conforme a etapa: formulário → avalista → documentos → concluído.
+// muda conforme a etapa: formulário → avalista → documentos → assinatura → primeira carga → concluído.
 const input: CSSProperties = { width: '100%', height: 44, padding: '0 12px', border: '1px solid #C3C7CC', borderRadius: 4, fontSize: 16, background: '#fff' }
 const label: CSSProperties = { display: 'block', fontSize: 14, fontWeight: 700, margin: '14px 0 6px', color: '#4a2430' }
 const botao: CSSProperties = { width: '100%', height: 48, border: 'none', borderRadius: 4, background: '#8e2a46', color: '#fff', fontSize: 16, fontWeight: 700, marginTop: 22 }
@@ -31,7 +31,9 @@ export default function FormularioPublico() {
           : info.etapa === 'formulario' ? <Formulario token={token!} info={info} onOk={carregar} />
           : info.etapa === 'avalista' ? <AvalistaForm token={token!} onOk={carregar} />
           : info.etapa === 'documentos' ? <Documentos token={token!} info={info} onOk={carregar} />
-          : info.etapa === 'concluido' ? <Aviso titulo="Tudo certo! 🎉" ok>Seu cadastro está completo. Sua consultora vai combinar o seu início com você.</Aviso>
+          : info.etapa === 'assinatura' ? <Assinatura info={info} />
+          : info.etapa === 'inicializacao' ? <PrimeiraCarga info={info} />
+          : info.etapa === 'concluido' ? <Aviso titulo="Bem-vinda à Clara Ferreira! 🎉" ok>Sua primeira carga foi entregue. Agora é com você — sua consultora vai te acompanhar nas vendas.</Aviso>
           : info.etapa === 'encerrado' ? <Aviso titulo="Cadastro encerrado">No momento não foi possível seguir com o seu cadastro. Sua consultora vai entrar em contato.</Aviso>
           : <Aviso titulo="Recebemos seus dados!" ok>Estamos analisando o seu cadastro. Você vai receber a resposta pelo WhatsApp.</Aviso>}
       </main>
@@ -199,6 +201,41 @@ function Documentos({ token, info, onOk }: { token: string; info: any; onOk: () 
       </div>
       {msg && <p style={{ color: '#b3261e', fontWeight: 700 }}>{msg}</p>}
       {!faltam && <p style={{ textAlign: 'center', color: '#4a2430' }}>Recebemos tudo! Estamos conferindo os seus documentos.</p>}
+    </div>
+  )
+}
+
+function Assinatura({ info }: { info: any }) {
+  const a = info.assinatura
+  if (!a) return <Aviso titulo="Preparando seu contrato" ok>Seus documentos foram conferidos. Em instantes o contrato fica pronto aqui.</Aviso>
+  if (a.assinou) return <Aviso titulo="Contrato assinado ✓" ok>{a.avalistaPendente ? 'Falta só o seu avalista assinar. Ele recebe o link dele pela sua consultora.' : 'Tudo certo! Já já combinamos a sua primeira carga.'}</Aviso>
+  return (
+    <div style={{ background: '#fff', borderRadius: 6, padding: '28px 20px', textAlign: 'center', boxShadow: '0 2px 10px rgba(90,36,51,.08)' }}>
+      <FileSignature size={44} color="#8e2a46" />
+      <h2 style={{ color: '#5a2433', margin: '10px 0 8px' }}>Falta assinar o contrato</h2>
+      <p style={{ color: '#4a2430', fontSize: 16, lineHeight: 1.5, margin: 0 }}>Seus documentos foram aprovados! Agora leia e assine o contrato de revenda e a nota promissória.</p>
+      <a href={'/assinar/' + a.token} style={{ ...botao, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>Ler e assinar</a>
+    </div>
+  )
+}
+
+function PrimeiraCarga({ info }: { info: any }) {
+  const i = info.inicializacao || {}
+  const quando = i.agendadoPara && new Date(i.agendadoPara).toLocaleString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+  const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const presencial = info.modalidade !== 'online'
+  let titulo = 'Estamos preparando a sua primeira carga', texto = 'Sua consultora vai combinar os detalhes com você pelo WhatsApp.', Icone = presencial ? CalendarClock : Truck
+  if (presencial && i.agendadoPara) { titulo = 'Sua retirada está marcada'; texto = `Te esperamos na matriz ${quando}.` }
+  if (presencial && !i.agendadoPara) { titulo = 'Vamos agendar a sua retirada'; texto = 'Sua consultora vai combinar com você o melhor dia para buscar a sua primeira carga na matriz.' }
+  if (!presencial && i.etapa === 'aguardando_pagamento') { titulo = 'Sua carga está pronta!'; texto = `O frete para te enviar fica em ${brl(i.valorFrete || 0)}. Sua consultora manda os dados do pagamento pelo WhatsApp.` }
+  if (!presencial && i.etapa === 'expedicao') { titulo = 'Pagamento recebido ✓'; texto = 'Sua carga vai ser enviada pelos Correios nos próximos dias.' }
+  if (!presencial && i.rastreio) { titulo = 'Sua carga está a caminho!'; texto = `Código de rastreamento: ${i.rastreio}` }
+  return (
+    <div style={{ background: '#fff', borderRadius: 6, padding: '28px 20px', textAlign: 'center', boxShadow: '0 2px 10px rgba(90,36,51,.08)' }}>
+      <Icone size={44} color="#8e2a46" />
+      <h2 style={{ color: '#5a2433', margin: '10px 0 8px' }}>{titulo}</h2>
+      <p style={{ color: '#4a2430', fontSize: 16, lineHeight: 1.5, margin: 0 }}>{texto}</p>
+      {i.rastreio && <a href={'https://rastreamento.correios.com.br/app/index.php?objetos=' + i.rastreio} target="_blank" rel="noreferrer" style={{ ...botao, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>Acompanhar nos Correios</a>}
     </div>
   )
 }

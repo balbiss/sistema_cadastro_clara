@@ -18,7 +18,8 @@ export function resumoParaCrm(c: Cadastro) {
     id: c.id, codigo: c.codigo, crm_lead_id: c.crmLeadId, crm_contact_id: c.crmContactId,
     nome: c.nome, cpf: c.cpf, telefone: c.telefone, consultora: c.consultoraNome, origem: c.origem, campanha: c.campanha,
     status: c.status, status_nome: statusNome(c.status), motivo: c.motivo, decidido_por: c.decididoPor,
-    modalidade: c.modalidade, etapa_entrada_em: c.etapaEntradaEm, prazo_etapa: c.prazoEtapa,
+    modalidade: c.modalidade, valor_credito: c.valorCredito, liberado_em: c.liberadoEm, inicializacao_etapa: c.inicEtapa,
+    inicializacao: c.inicializacao, iniciada_em: c.iniciadaEm, etapa_entrada_em: c.etapaEntradaEm, prazo_etapa: c.prazoEtapa,
     link_formulario: linkFormulario(c), link_dossie: linkDossie(c),
   };
 }
@@ -29,13 +30,14 @@ export async function registrarEvento(cadastroId: number, tipo: string, descrica
 }
 
 /** Troca a etapa: grava data de entrada e prazo da nova etapa e avisa o CRM (que move o card). */
-export async function mudarStatus(c: Cadastro, status: Status, motivo: string | null, autor: string, extra: Partial<Cadastro> = {}) {
+// prazo: quando a etapa vence numa data própria (ex.: dia agendado com a cliente), em vez do prazo padrão.
+export async function mudarStatus(c: Cadastro, status: Status, motivo: string | null, autor: string, extra: Partial<Cadastro> = {}, prazo?: Date | null) {
   const prazos = await getPrazos();
   const agora = new Date();
   const horas = prazos[status];
   const [novo] = await db.update(cadastros).set({
     ...extra, status, motivo, etapaEntradaEm: agora, updatedAt: agora,
-    prazoEtapa: horas ? new Date(agora.getTime() + horas * 3600_000) : null,
+    prazoEtapa: prazo !== undefined ? prazo : horas ? new Date(agora.getTime() + horas * 3600_000) : null,
   }).where(eq(cadastros.id, c.id)).returning();
   await registrarEvento(c.id, 'status_alterado', `${statusNome(c.status)} → ${statusNome(status)}${motivo ? ' — ' + motivo : ''}`, autor,
     { de: c.status, para: status, motivo });

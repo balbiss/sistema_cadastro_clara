@@ -7,11 +7,16 @@ export const STATUS = {
   aprovado: 'Aprovado',
   aprovado_avalista: 'Aprovado com avalista',
   documentos_ok: 'Documentação conferida',
+  aguardando_assinatura: 'Aguardando assinatura',
+  inicializacao: 'Liberada — em inicialização',
+  iniciada: 'Revendedora iniciada',
   reprovado: 'Reprovado',
   desistencia: 'Desistência',
 } as const;
 export type Status = keyof typeof STATUS;
 export const statusNome = (s: string) => STATUS[s as Status] ?? s;
+// Etapas em que o cadastro não anda mais (sem prazo, fora do "em andamento").
+export const FINAIS: Status[] = ['iniciada', 'reprovado', 'desistencia'];
 
 // Ações que uma regra pode tomar quando dispara (configuráveis na tela Regras).
 export const ACOES = ['pendente_avalista', 'analise_humana', 'reprovar'] as const;

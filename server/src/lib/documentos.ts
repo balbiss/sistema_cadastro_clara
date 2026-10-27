@@ -1,11 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
-import { db } from '../db/client.js';
-import { cadastros, documentos, pendencias } from '../db/schema.js';
+import type { cadastros, documentos } from '../db/schema.js';
 import { DOCS_AVALISTA, DOCS_TITULAR, DOC_NOME } from './status.js';
-import { mudarStatus } from './eventos.js';
 
 type Cadastro = typeof cadastros.$inferSelect;
 type Documento = typeof documentos.$inferSelect;
@@ -32,16 +29,6 @@ export function situacaoDocs(c: Cadastro, docs: Documento[]) {
   const aConferir = itens.filter(i => i.doc?.status === 'enviado');
   const situacao = faltam.length ? 'incompleta' : aConferir.length ? 'em_conferencia' : 'completa';
   return { itens, situacao, faltam: faltam.map(i => i.nome) };
-}
-
-/** Item 10: só libera (Documentação conferida) com tudo conferido e nenhuma pendência aberta. */
-export async function tentarLiberar(c: Cadastro, autor: string) {
-  if (!['aprovado', 'aprovado_avalista'].includes(c.status)) return c;
-  const docs = await db.select().from(documentos).where(eq(documentos.cadastroId, c.id));
-  if (situacaoDocs(c, docs).situacao !== 'completa') return c;
-  const abertas = await db.select({ id: pendencias.id }).from(pendencias).where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm)));
-  if (abertas.length) return c;
-  return mudarStatus(c, 'documentos_ok', 'Todos os documentos conferidos', autor);
 }
 
 /** Comprovante de residência: até 3 meses (política proposta no item 5). */

@@ -157,7 +157,79 @@ t('com pendência aberta NÃO libera', d.cadastro.status === 'aprovado', d.cadas
 const pend = d.pendencias.find(p => !p.resolvidaEm);
 await req('POST', `/api/pendencias/${pend.id}/resolver`, { token: adm });
 d = await dossie(a.id);
-t('tudo conferido + sem pendência → Documentação conferida', d.cadastro.status === 'documentos_ok', d.cadastro.status);
+t('tudo conferido + sem pendência → contrato gerado, Aguardando assinatura', d.cadastro.status === 'aguardando_assinatura', d.cadastro.status);
+t('passou por Documentação conferida', d.eventos.some(e => e.tipo === 'status_alterado' && e.dados?.para === 'documentos_ok'));
+
+// ---- formalização (item 9) ----
+t('contrato e promissória gerados', !!d.formalizacao?.contrato && d.formalizacao.promissoria.includes('três mil reais'), d.formalizacao?.promissoria?.slice(0, 200));
+t('contrato traz nome e CPF da cliente', d.formalizacao.contrato.includes('Maria Aprovada') && d.formalizacao.contrato.includes('529.982.247-25'));
+t('só a titular assina (sem avalista)', d.formalizacao.assinaturas.length === 1 && d.formalizacao.assinaturas[0].papel === 'titular');
+t('liberação bloqueada até assinar', d.liberacao.find(r => r.chave === 'assinaturas').ok === false);
+const pub = (await req('GET', `/api/publico/${a.token}`)).json;
+t('cliente vê etapa assinatura com o link', pub.etapa === 'assinatura' && !!pub.assinatura?.token);
+t('administrativo não refaz contrato', (await req('POST', `/api/cadastros/${a.id}/formalizacao`, { token: adm, body: { valor: 2500 } })).status === 403);
+const tokAntigo = pub.assinatura.token;
+await req('POST', `/api/cadastros/${a.id}/formalizacao`, { token: dir, body: { valor: 2500 } });
+d = await dossie(a.id);
+t('refazer muda valor e cria versão 2', d.formalizacao.versao === 2 && d.formalizacao.valor === 2500 && d.formalizacao.promissoria.includes('dois mil e quinhentos reais'), d.formalizacao.promissoria.slice(0, 300));
+t('link antigo não assina mais', (await req('POST', `/api/assinatura/${tokAntigo}`, { body: { cpf: '52998224725', aceite: true } })).status === 409);
+const tok = d.formalizacao.assinaturas[0].token;
+const assin = (await req('GET', `/api/assinatura/${tok}`)).json;
+t('página de assinatura mostra os textos', assin.contrato.includes('CONTRATO') && assin.papel === 'titular' && !assin.assinadoEm);
+t('CPF errado não assina', (await req('POST', `/api/assinatura/${tok}`, { body: { cpf: '11144477735', aceite: true } })).status === 400);
+t('sem aceite não assina', (await req('POST', `/api/assinatura/${tok}`, { body: { cpf: '52998224725' } })).status === 400);
+t('assina com o CPF certo', (await req('POST', `/api/assinatura/${tok}`, { body: { cpf: '529.982.247-25', aceite: true } })).status === 200);
+d = await dossie(a.id);
+t('tudo assinado → liberada (inicialização presencial)', d.cadastro.status === 'inicializacao' && d.cadastro.inicEtapa === 'aguardando_agendamento', d.cadastro.status + ' ' + d.cadastro.inicEtapa);
+t('requisitos de liberação todos ok', d.liberacao.every(r => r.ok));
+t('assinatura registrada com data e hash', !!d.formalizacao.assinaturas[0].assinadoEm && d.eventos.some(e => e.tipo === 'assinatura' && e.dados.hash === d.formalizacao.hash));
+
+// ---- inicialização presencial (item 6) ----
+const ini = (id, acao, body = {}) => req('POST', `/api/cadastros/${id}/inicializacao`, { token: adm, body: { acao, ...body } });
+t('ação de outra modalidade é recusada', (await ini(a.id, 'informar_frete', { carga: 'C1', valorFrete: 20 })).status === 409);
+t('não entrega antes de agendar', (await ini(a.id, 'entregar')).status === 409);
+t('agendar exige data', (await ini(a.id, 'agendar')).status === 409);
+const dia = new Date(Date.now() + 2 * 86400_000); dia.setHours(10, 0, 0, 0);
+t('agenda a retirada', (await ini(a.id, 'agendar', { data: dia.toISOString() })).json.etapa === 'agendado');
+d = await dossie(a.id);
+t('prazo vira o dia agendado', new Date(d.cadastro.prazoEtapa).getTime() === dia.getTime());
+t('cliente vê o dia agendado', (await req('GET', `/api/publico/${a.token}`)).json.inicializacao?.agendadoPara === dia.toISOString());
+const bloq = (await req('POST', `/api/cadastros/${a.id}/pendencias`, { token: adm, body: { descricao: 'Confirmar referência comercial' } })).json;
+t('pendência aberta bloqueia a inicialização', (await ini(a.id, 'carga_conferida', { carga: 'CG-101' })).status === 409);
+await req('POST', `/api/pendencias/${bloq.id}/resolver`, { token: adm });
+t('carga conferida', (await ini(a.id, 'carga_conferida', { carga: 'CG-101', valorCarga: 2400 })).json.etapa === 'carga_pronta');
+t('entrega na matriz → Revendedora iniciada', (await ini(a.id, 'entregar')).json.status === 'iniciada');
+d = await dossie(a.id);
+t('iniciada com data e carga registradas', !!d.cadastro.iniciadaEm && d.cadastro.inicializacao.carga === 'CG-101' && !d.cadastro.prazoEtapa);
+t('cliente vê concluído', (await req('GET', `/api/publico/${a.token}`)).json.etapa === 'concluido');
+t('iniciada não aceita desistência', (await req('POST', `/api/cadastros/${a.id}/desistencia`, { token: dir, body: { motivo: 'teste' } })).status === 409);
+
+// ---- inicialização online, com avalista (cadastro "m") ----
+for (const tipo of ['rg_frente', 'rg_verso', 'comprovante_residencia', 'avalista_rg_frente', 'avalista_rg_verso', 'avalista_comprovante_residencia']) await enviaDoc(m.token, tipo);
+await req('PATCH', `/api/cadastros/${m.id}`, { token: dir, body: { modalidade: 'online' } });
+d = await dossie(m.id);
+for (const x of d.documentos) await req('POST', `/api/documentos/${x.id}/conferir`, { token: adm, body: { status: 'conferido', dataEmissao: x.tipo.endsWith('comprovante_residencia') ? hoje.toISOString().slice(0, 10) : undefined } });
+d = await dossie(m.id);
+t('com avalista: 2 assinaturas (cliente + avalista)', d.cadastro.status === 'aguardando_assinatura' && d.formalizacao?.assinaturas.length === 2, d.cadastro.status);
+t('promissória cita o avalista', d.formalizacao.promissoria.includes('Pedro Avalista'));
+const [sTit, sAv] = ['titular', 'avalista'].map(p => d.formalizacao.assinaturas.find(x => x.papel === p).token);
+await req('POST', `/api/assinatura/${sTit}`, { body: { cpf: '39053344705', aceite: true } });
+d = await dossie(m.id);
+t('só a cliente assinou → ainda aguardando o avalista', d.cadastro.status === 'aguardando_assinatura' && /avalista/.test(d.liberacao.find(r => r.chave === 'assinaturas').detalhe));
+await req('POST', `/api/assinatura/${sAv}`, { body: { cpf: '52998224725', aceite: true } });
+d = await dossie(m.id);
+t('avalista assinou → inicialização online (montagem)', d.cadastro.status === 'inicializacao' && d.cadastro.inicEtapa === 'montagem', d.cadastro.inicEtapa);
+t('frete exige valor', (await ini(m.id, 'informar_frete', { carga: 'CG-202' })).status === 409);
+t('carga montada + frete', (await ini(m.id, 'informar_frete', { carga: 'CG-202', valorFrete: 32.5 })).json.etapa === 'aguardando_pagamento');
+t('cliente vê o frete', (await req('GET', `/api/publico/${m.token}`)).json.inicializacao?.valorFrete === 32.5);
+t('não envia sem pagamento', (await ini(m.id, 'enviar', { rastreio: 'AA123' })).status === 409);
+t('pagamento confirmado → expedir', (await ini(m.id, 'confirmar_pagamento')).json.etapa === 'expedicao');
+t('envio exige rastreio', (await ini(m.id, 'enviar')).status === 409);
+t('enviado com rastreio', (await ini(m.id, 'enviar', { rastreio: 'qb123456789br' })).json.etapa === 'em_transporte');
+t('cliente vê o rastreio', (await req('GET', `/api/publico/${m.token}`)).json.inicializacao?.rastreio === 'QB123456789BR');
+t('recebimento confirmado → iniciada', (await ini(m.id, 'confirmar_recebimento')).json.status === 'iniciada');
+const fila = (await req('GET', '/api/inicializacao', { token: adm })).json;
+t('fila de inicialização lista as iniciadas', fila.cadastros.filter(x => x.status === 'iniciada').length === 2);
 
 // correção de dados + responsável
 await req('PATCH', `/api/cadastros/${b.id}`, { token: dir, body: { telefone: '(91) 98888-7777', responsavelId: 2 } });
@@ -170,12 +242,14 @@ await espera(1500);
 const rec = (await req('GET', '/api/crm-teste/recebidos', { token: dir })).json.filter(x => x.corpo.cadastro.crm_lead_id === 'L1-' + sufixo).reverse();
 const tipos = rec.map(x => x.corpo.evento);
 t('CRM recebeu os avisos do cadastro', rec.length >= 10, rec.length);
-t('em ordem (enviado → … → documentos ok)', tipos[0] === 'formulario_enviado' && rec.at(-1).corpo.cadastro.status === 'documentos_ok', tipos.join(','));
+t('em ordem (enviado → … → iniciada)', tipos[0] === 'formulario_enviado' && rec.at(-1).corpo.cadastro.status === 'iniciada', tipos.join(','));
+t('CRM recebeu os links de assinatura', rec.some(x => x.corpo.evento === 'formalizacao_gerada' && x.corpo.dados.links?.[0]?.link.includes('/assinar/')));
+t('CRM recebeu a data de início', rec.some(x => x.corpo.cadastro.iniciada_em));
 t('aviso traz status, motivo e link do dossiê', rec.some(x => x.corpo.cadastro.status === 'aprovado' && x.corpo.cadastro.link_dossie.includes('/cadastros/')));
 t('aviso não traz resultado do SPC', !JSON.stringify(rec).includes('negativacoes'));
 const resumo = (await req('GET', '/api/cadastros/resumo', { token: dir })).json;
 t('resumo por etapa', resumo.porStatus.aprovado >= 1 && resumo.porStatus.reprovado >= 2);
-t('consulta pelo lead (CRM)', (await req('GET', '/api/integracao/cadastros/L3-' + sufixo, { apiKey: integ.apiKey })).json.status === 'aprovado_avalista');
+t('consulta pelo lead (CRM)', (await req('GET', '/api/integracao/cadastros/L3-' + sufixo, { apiKey: integ.apiKey })).json.status === 'iniciada');
 
 console.log(`\n${ok} ok, ${falhas} falha(s)`);
 process.exit(falhas ? 1 : 0);

@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, AlertTriangle, CheckCircle2, ChevronRight, Clock, FileSearch, ListChecks, Plus, TrendingUp, UserCheck } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, ChevronRight, Clock, FileSearch, ListChecks, PackageCheck, Plus, TrendingUp, UserCheck } from 'lucide-react'
 import { api, usuarioAtual } from '../lib/api'
 import { STATUS } from '../lib/status'
 import { btn } from '../components/ui'
@@ -28,13 +28,18 @@ const ETAPAS: { chave: string; nome: string; status: string[] }[] = [
   { chave: 'analise', nome: 'Em análise', status: ['formulario_preenchido', 'analise_humana'] },
   { chave: 'avalista', nome: 'Aguardando avalista', status: ['pendente_avalista'] },
   { chave: 'aprovado', nome: 'Aprovados — documentos', status: ['aprovado', 'aprovado_avalista'] },
-  { chave: 'ok', nome: 'Documentação conferida', status: ['documentos_ok'] },
+  { chave: 'assinatura', nome: 'Contrato p/ assinar', status: ['documentos_ok', 'aguardando_assinatura'] },
+  { chave: 'inicializacao', nome: 'Em inicialização', status: ['inicializacao'] },
+  { chave: 'iniciada', nome: 'Iniciadas', status: ['iniciada'] },
 ]
-const COR_ETAPA: Record<string, string> = { enviado: STATUS.formulario_enviado.cor, analise: STATUS.analise_humana.cor, avalista: STATUS.pendente_avalista.cor, aprovado: STATUS.aprovado.cor, ok: STATUS.documentos_ok.cor }
+const COR_ETAPA: Record<string, string> = { enviado: STATUS.formulario_enviado.cor, analise: STATUS.analise_humana.cor, avalista: STATUS.pendente_avalista.cor, aprovado: STATUS.aprovado.cor, assinatura: STATUS.aguardando_assinatura.cor, inicializacao: STATUS.inicializacao.cor, iniciada: STATUS.iniciada.cor }
 const RAZAO: Record<string, { cor: string; fundo: string }> = {
   'Aguardando decisão': { cor: '#4b4fb8', fundo: '#eceefe' },
   'Documentos para conferir': { cor: '#1f6fb2', fundo: '#e6f1fb' },
   'Prazo vencido': { cor: '#c0392b', fundo: '#fdecea' },
+  'Agendar início': { cor: '#8a5a00', fundo: '#fff1d6' },
+  'Assinatura atrasada': { cor: '#6b3fb5', fundo: '#f1e9ff' },
+  'Inicialização parada': { cor: '#c0392b', fundo: '#fdecea' },
 }
 
 export default function Painel() {
@@ -62,6 +67,8 @@ export default function Painel() {
       <section className="numeros" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <Numero destaque titulo="Em andamento" valor={d.emAndamento} icone={<Activity size={17} />} rodape={`${d.novos30} novos nos últimos 30 dias`} onClick={() => nav('/cadastros')} />
         <Numero titulo="Aprovados" valor={d.aprovados} icone={<UserCheck size={17} />} rodape={d.taxaAprovacao == null ? 'nenhum decidido ainda' : `${Math.round(d.taxaAprovacao * 100)}% de aprovação`} />
+        <Numero titulo="Revendedoras iniciadas" valor={d.iniciadas} icone={<PackageCheck size={17} />} onClick={() => nav('/inicializacao')}
+          rodape={`${d.iniciadas30} nos últimos 30 dias · ${d.emInicializacao} em inicialização`} />
         <Numero titulo="Tempo até a decisão" valor={duracao(d.horasMediasDecisao)} icone={<Clock size={17} />} rodape="média do formulário à decisão" />
         <Numero titulo="Documentos a conferir" valor={d.docsAConferir} icone={<FileSearch size={17} />} rodape="cadastros com arquivo novo" alerta={d.docsAConferir > 0} />
         <Numero titulo="Pendências abertas" valor={d.pendenciasAbertas} icone={<ListChecks size={17} />} onClick={() => nav('/pendencias')}
@@ -74,7 +81,7 @@ export default function Painel() {
           {ETAPAS.map((e, i) => {
             const n = soma(e.status)
             return (
-              <button key={e.chave} onClick={() => nav('/cadastros' + (e.status.length === 1 ? '?status=' + e.status[0] : ''))} className="etapa"
+              <button key={e.chave} onClick={() => nav(e.chave === 'inicializacao' || e.chave === 'iniciada' ? '/inicializacao' : '/cadastros' + (e.status.length === 1 ? '?status=' + e.status[0] : e.chave === 'assinatura' ? '?status=aguardando_assinatura' : ''))} className="etapa"
                 style={{ position: 'relative', border: 'none', background: 'none', textAlign: 'left', padding: '0 18px 0 0', cursor: 'pointer' }}>
                 <div style={{ height: 6, borderRadius: 3, background: COR_ETAPA[e.chave], border: '1px solid rgba(0,0,0,.06)' }} />
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 12 }}>

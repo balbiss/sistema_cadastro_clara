@@ -23,6 +23,10 @@ export const settings = pgTable('settings', {
 export type Endereco = { cep?: string; rua?: string; numero?: string; complemento?: string; bairro?: string; cidade?: string; uf?: string };
 export type Avalista = { nome?: string; cpf?: string; telefone?: string; dataNascimento?: string; endereco?: Endereco };
 export type Checagem = { regra: string; ok: boolean; detalhe: string };
+export type Inicializacao = {
+  agendadoPara?: string; carga?: string; valorCarga?: number; valorFrete?: number; pagoEm?: string;
+  rastreio?: string; enviadoEm?: string; entregueEm?: string; entreguePor?: string; observacao?: string;
+};
 
 export const cadastros = pgTable('cadastros', {
   id: serial('id').primaryKey(),
@@ -59,6 +63,12 @@ export const cadastros = pgTable('cadastros', {
   // item 3 do briefing: toda etapa tem data de entrada e prazo
   etapaEntradaEm: timestamp('etapa_entrada_em', { withTimezone: true }).notNull().defaultNow(),
   prazoEtapa: timestamp('prazo_etapa', { withTimezone: true }),
+  // formalização (item 9) e inicialização (itens 10-11)
+  valorCredito: integer('valor_credito'), // valor da promissória, em reais
+  liberadoEm: timestamp('liberado_em', { withTimezone: true }),
+  inicEtapa: text('inic_etapa'), // sub-etapa da inicialização (ver lib/inicializacao.ts)
+  inicializacao: jsonb('inicializacao').$type<Inicializacao>(),
+  iniciadaEm: timestamp('iniciada_em', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -116,6 +126,37 @@ export const eventos = pgTable('eventos', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Contrato + nota promissória gerados para o cadastro (item 9). Refazer cancela a versão anterior
+// e as assinaturas dela. O texto fica guardado como foi assinado (com o hash).
+export const formalizacoes = pgTable('formalizacoes', {
+  id: serial('id').primaryKey(),
+  cadastroId: integer('cadastro_id').notNull(),
+  versao: integer('versao').notNull(),
+  contrato: text('contrato').notNull(),
+  promissoria: text('promissoria').notNull(),
+  valor: integer('valor').notNull(),
+  hash: text('hash').notNull(),
+  provedor: text('provedor').notNull(), // simulado | (serviço de assinatura escolhido)
+  criadoPor: text('criado_por'),
+  canceladaEm: timestamp('cancelada_em', { withTimezone: true }),
+  concluidaEm: timestamp('concluida_em', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const assinaturas = pgTable('assinaturas', {
+  id: serial('id').primaryKey(),
+  formalizacaoId: integer('formalizacao_id').notNull(),
+  cadastroId: integer('cadastro_id').notNull(),
+  papel: text('papel').notNull(), // titular | avalista
+  nome: text('nome').notNull(),
+  cpf: text('cpf').notNull(),
+  token: text('token').notNull().unique(),
+  assinadoEm: timestamp('assinado_em', { withTimezone: true }),
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // SQL de criação (o banco local é o PGlite — Postgres dentro do Node, sem Docker).
 export const DDL = `
 CREATE TABLE IF NOT EXISTS users (
@@ -148,4 +189,16 @@ CREATE TABLE IF NOT EXISTS eventos (
   autor text, crm_status text NOT NULL DEFAULT 'pendente', crm_tentativas integer NOT NULL DEFAULT 0, crm_erro text,
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS eventos_cadastro_idx ON eventos (cadastro_id);
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS valor_credito integer;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS liberado_em timestamptz;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS inic_etapa text;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS inicializacao jsonb;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS iniciada_em timestamptz;
+CREATE TABLE IF NOT EXISTS formalizacoes (
+  id serial PRIMARY KEY, cadastro_id integer NOT NULL, versao integer NOT NULL, contrato text NOT NULL, promissoria text NOT NULL,
+  valor integer NOT NULL, hash text NOT NULL, provedor text NOT NULL, criado_por text, cancelada_em timestamptz, concluida_em timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS assinaturas (
+  id serial PRIMARY KEY, formalizacao_id integer NOT NULL, cadastro_id integer NOT NULL, papel text NOT NULL, nome text NOT NULL,
+  cpf text NOT NULL, token text NOT NULL UNIQUE, assinado_em timestamptz, ip text, user_agent text, created_at timestamptz NOT NULL DEFAULT now());
 `;

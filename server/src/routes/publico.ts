@@ -1,13 +1,16 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq, ilike, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { cadastros, documentos } from '../db/schema.js';
+import { assinaturas, cadastros, documentos, formalizacoes, pendencias } from '../db/schema.js';
 import { analisar } from '../lib/analise.js';
 import { mudarStatus, registrarEvento } from '../lib/eventos.js';
 import { salvarArquivo, situacaoDocs } from '../lib/documentos.js';
 import { DOC_NOME } from '../lib/status.js';
+import { formalizacaoAtual } from '../lib/formalizacao.js';
+import { avancar } from '../lib/liberacao.js';
+import { nomeEtapaInic } from '../lib/inicializacao.js';
 import { soDigitos } from '../lib/util.js';
 
 // Formulário que a cliente abre pelo link (sem login). O mesmo link serve pra tudo:
@@ -26,7 +29,9 @@ function etapaCliente(status: string) {
   if (status === 'formulario_enviado') return 'formulario';
   if (status === 'pendente_avalista') return 'avalista';
   if (['aprovado', 'aprovado_avalista'].includes(status)) return 'documentos';
-  if (status === 'documentos_ok') return 'concluido';
+  if (status === 'aguardando_assinatura') return 'assinatura';
+  if (status === 'inicializacao') return 'inicializacao';
+  if (status === 'iniciada') return 'concluido';
   if (status === 'reprovado' || status === 'desistencia') return 'encerrado';
   return 'em_analise';
 }
@@ -38,6 +43,16 @@ publicoRouter.get('/api/publico/:token', async (req, res) => {
   const sd = situacaoDocs(c, docs);
   res.json({
     etapa: etapaCliente(c.status), nome: c.nome, telefone: c.telefone, email: c.email, cpf: c.cpf, consultora: c.consultoraNome,
+    modalidade: c.modalidade,
+    assinatura: await (async () => {
+      if (c.status !== 'aguardando_assinatura') return null;
+      const f = await formalizacaoAtual(c.id);
+      const eu = f?.assinaturas.find(a => a.papel === 'titular');
+      return f && { token: eu?.token, assinou: !!eu?.assinadoEm, avalistaPendente: f.assinaturas.some(a => a.papel === 'avalista' && !a.assinadoEm) };
+    })(),
+    // a cliente vê só o que interessa a ela: dia marcado, frete e rastreio
+    inicializacao: c.status === 'inicializacao' ? { etapa: c.inicEtapa, etapaNome: nomeEtapaInic(c.inicEtapa), agendadoPara: c.inicializacao?.agendadoPara,
+      valorFrete: c.inicializacao?.valorFrete, pago: !!c.inicializacao?.pagoEm, rastreio: c.inicializacao?.rastreio } : null,
     documentos: sd.itens.map(i => ({ tipo: i.tipo, nome: i.nome, enviado: !!i.doc && i.doc.status !== 'recusado', recusado: i.doc?.status === 'recusado', observacao: i.doc?.status === 'recusado' ? i.doc.observacao : null })),
   });
 });
@@ -90,6 +105,10 @@ publicoRouter.post('/api/publico/:token/avalista', async (req, res) => {
   const p = avalista.safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Confira os dados do avalista', detalhes: p.error.flatten() });
   await registrarEvento(c.id, 'avalista_informado', `Avalista informado: ${p.data.nome}`, CLIENTE, { avalista: { ...p.data, cpf: soDigitos(p.data.cpf) } });
+  // a pendência "conseguir avalista" foi cumprida (senão trava a liberação lá na frente)
+  const fechadas = await db.update(pendencias).set({ resolvidaEm: new Date(), resolvidaPor: CLIENTE })
+    .where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm), ilike(pendencias.descricao, 'Conseguir avalista%'))).returning();
+  for (const f of fechadas) await registrarEvento(c.id, 'pendencia_resolvida', 'Pendência resolvida: ' + f.descricao, CLIENTE, { pendencia_id: f.id });
   const comAvalista = await mudarStatus(c, 'formulario_preenchido', 'Avalista informado — reanalisando', CLIENTE,
     { temAvalista: true, avalista: { ...p.data, cpf: soDigitos(p.data.cpf) } });
   res.json({ ok: true });
@@ -110,4 +129,47 @@ publicoRouter.post('/api/publico/:token/documentos', upload.single('arquivo'), a
   const sd = situacaoDocs(c, docs);
   if (!sd.faltam.length) await registrarEvento(c.id, 'documentos_recebidos', 'Cliente enviou todos os documentos — aguardando conferência', CLIENTE);
   res.json({ ok: true, faltam: sd.faltam });
+});
+
+// ---------- assinatura eletrônica (item 9) — SIMULADA até a Clara escolher o serviço ----------
+async function porTokenAssinatura(token: string) {
+  const [a] = await db.select().from(assinaturas).where(eq(assinaturas.token, token)).limit(1);
+  if (!a) return null;
+  const [f] = await db.select().from(formalizacoes).where(eq(formalizacoes.id, a.formalizacaoId)).limit(1);
+  const [c] = await db.select().from(cadastros).where(eq(cadastros.id, a.cadastroId)).limit(1);
+  return { a, f, c };
+}
+
+publicoRouter.get('/api/assinatura/:token', async (req, res) => {
+  const r = await porTokenAssinatura(req.params.token);
+  if (!r) return res.status(404).json({ error: 'Link de assinatura inválido' });
+  const { a, f, c } = r;
+  res.json({
+    papel: a.papel, nome: a.nome, cadastroNome: c.nome, codigo: c.codigo, assinadoEm: a.assinadoEm,
+    cancelada: !!f.canceladaEm, valor: f.valor, versao: f.versao, hash: f.hash, contrato: f.contrato, promissoria: f.promissoria, provedor: f.provedor,
+  });
+});
+
+publicoRouter.post('/api/assinatura/:token', async (req, res) => {
+  const r = await porTokenAssinatura(req.params.token);
+  if (!r) return res.status(404).json({ error: 'Link de assinatura inválido' });
+  const { a, f, c } = r;
+  if (f.canceladaEm) return res.status(409).json({ error: 'Este contrato foi substituído. Peça o link novo à sua consultora.' });
+  if (a.assinadoEm) return res.status(409).json({ error: 'Você já assinou' });
+  if (c.status !== 'aguardando_assinatura') return res.status(409).json({ error: 'Este cadastro não está aguardando assinatura' });
+  if (req.body.aceite !== true) return res.status(400).json({ error: 'Marque que leu e concorda' });
+  if (soDigitos(req.body.cpf) !== a.cpf) return res.status(400).json({ error: 'CPF não confere com o de quem deve assinar' });
+  const agora = new Date();
+  await db.update(assinaturas).set({ assinadoEm: agora, ip: req.ip || null, userAgent: String(req.headers['user-agent'] || '').slice(0, 300) })
+    .where(and(eq(assinaturas.id, a.id), eq(assinaturas.formalizacaoId, f.id)));
+  const quemAssinou = a.papel === 'titular' ? 'cliente' : 'avalista';
+  await registrarEvento(c.id, 'assinatura', `Contrato e promissória assinados pela ${quemAssinou} (${a.nome})`, `${a.nome} (${quemAssinou})`,
+    { papel: a.papel, versao: f.versao, hash: f.hash, ip: req.ip, provedor: f.provedor });
+  const todas = await db.select().from(assinaturas).where(eq(assinaturas.formalizacaoId, f.id));
+  if (todas.every(x => x.assinadoEm)) {
+    await db.update(formalizacoes).set({ concluidaEm: agora }).where(eq(formalizacoes.id, f.id));
+    await registrarEvento(c.id, 'formalizacao_concluida', 'Todas as assinaturas recebidas', 'sistema', { versao: f.versao, hash: f.hash });
+    await avancar(c, 'sistema');
+  }
+  res.json({ ok: true });
 });

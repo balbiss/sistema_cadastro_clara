@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ClipboardCheck, Home, ListChecks, LogOut, Menu, PanelLeft, PlugZap, SlidersHorizontal, Users, X } from 'lucide-react'
+import { ClipboardCheck, FileSignature, Home, ListChecks, LogOut, Menu, PackageCheck, PanelLeft, PlugZap, SlidersHorizontal, Users, X } from 'lucide-react'
 import { api, usuarioAtual } from '../lib/api'
 import { CARGO } from '../lib/status'
 import { ClaraLogo } from './extra'
@@ -8,12 +8,14 @@ import { ClaraLogo } from './extra'
 // Casca igual à do CRM Clara v2: menu lateral no rosa da Clara, texto/logo vinho, item ativo em branco.
 const SB = { bg: '#f0d0d7', text: '#4a2430', muted: '#85525f', line: 'rgba(90,36,51,.14)', activeBg: '#ffffff', active: '#8e2a46', logo: '#5a2433' }
 
-type Item = { path: string; label: string; icon: typeof Home; badge?: 'pendencias' | 'analise'; soDiretoria?: boolean }
+type Item = { path: string; label: string; icon: typeof Home; badge?: 'pendencias' | 'analise' | 'inicializacao'; soDiretoria?: boolean }
 const NAV: Item[] = [
   { path: '/', label: 'Painel', icon: Home },
   { path: '/cadastros', label: 'Cadastros', icon: ClipboardCheck, badge: 'analise' },
+  { path: '/inicializacao', label: 'Inicialização', icon: PackageCheck, badge: 'inicializacao' },
   { path: '/pendencias', label: 'Pendências', icon: ListChecks, badge: 'pendencias' },
   { path: '/regras', label: 'Regras de análise', icon: SlidersHorizontal },
+  { path: '/modelos', label: 'Contrato e promissória', icon: FileSignature },
   { path: '/integracao', label: 'Integração com o CRM', icon: PlugZap, soDiretoria: true },
   { path: '/usuarios', label: 'Usuários', icon: Users, soDiretoria: true },
 ]
@@ -24,10 +26,10 @@ export function AppShell() {
   const user = usuarioAtual()
   const [aberto, setAberto] = useState(localStorage.getItem('cad_sidebar') !== 'fechado')
   const [mobile, setMobile] = useState(false)
-  const [badges, setBadges] = useState({ pendencias: 0, analise: 0 })
+  const [badges, setBadges] = useState({ pendencias: 0, analise: 0, inicializacao: 0 })
 
   useEffect(() => {
-    const carregar = () => api('GET', '/cadastros/resumo').then(r => setBadges({ pendencias: r.pendenciasAbertas, analise: r.porStatus.analise_humana || 0 })).catch(() => {})
+    const carregar = () => api('GET', '/cadastros/resumo').then(r => setBadges({ pendencias: r.pendenciasAbertas, analise: r.porStatus.analise_humana || 0, inicializacao: r.porStatus.inicializacao || 0 })).catch(() => {})
     carregar()
     const t = setInterval(carregar, 30_000)
     return () => clearInterval(t)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, usuarioAtual } from '../lib/api'
-import { ACAO_NOME, STATUS } from '../lib/status'
+import { ACAO_NOME, nomePrazo } from '../lib/status'
 import { cpfFmt } from '../lib/fmt'
 import { Card, btn, inputStyle, labelStyle } from '../components/ui'
 import { Carregando, PageHeader, toast } from '../components/extra'
@@ -69,7 +69,7 @@ export default function Regras() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card title="Prazo de cada etapa (horas)">
-            {Object.keys(d.prazos).map(k => <div key={k}>{linha(STATUS[k]?.nome || k,
+            {Object.keys(d.prazos).map(k => <div key={k}>{linha(nomePrazo(k),
               <input disabled={!pode} type="number" value={d.prazos[k]} onChange={e => setD({ ...d, prazos: { ...d.prazos, [k]: Number(e.target.value) } })} style={{ ...inputStyle, width: 90 }} />)}</div>)}
             <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 0 }}>Passou do prazo, o cadastro aparece como vencido no Painel e na lista.</p>
           </Card>

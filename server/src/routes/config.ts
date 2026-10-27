@@ -6,7 +6,7 @@ import { desc, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { cadastros, eventos, users } from '../db/schema.js';
 import { assinarToken, exigir, PODE, requireApiKey, requireAuth } from '../lib/auth.js';
-import { CENARIOS_PADRAO, PRAZOS_PADRAO, REGRAS_PADRAO, getCenarios, getIntegracao, getPrazos, getRegras, setSetting } from '../lib/settings.js';
+import { CENARIOS_PADRAO, MODELOS_PADRAO, PRAZOS_PADRAO, REGRAS_PADRAO, getCenarios, getIntegracao, getModelos, getPrazos, getRegras, setSetting } from '../lib/settings.js';
 import { criarCadastro } from '../lib/cadastros.js';
 import { enviarPendentesAoCrm, linkFormulario, resumoParaCrm } from '../lib/eventos.js';
 import { ACOES, STATUS } from '../lib/status.js';
@@ -46,6 +46,17 @@ configRouter.put('/api/config/regras', requireAuth, soDiretoria, async (req, res
   await setSetting('regras', p.data.regras);
   await setSetting('prazos', p.data.prazos);
   await setSetting('spc_cenarios', p.data.cenarios);
+  res.json({ ok: true });
+});
+
+// ---------- modelos do contrato e da promissória (item 9) ----------
+configRouter.get('/api/config/modelos', requireAuth, async (_req, res) => {
+  res.json({ modelos: await getModelos(), padrao: MODELOS_PADRAO });
+});
+configRouter.put('/api/config/modelos', requireAuth, soDiretoria, async (req, res) => {
+  const p = z.object({ valorPadrao: z.number().positive(), contrato: z.string().min(20), promissoria: z.string().min(20) }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: 'Preencha o valor padrão e os dois modelos' });
+  await setSetting('modelos', p.data);
   res.json({ ok: true });
 });
 
@@ -123,7 +134,7 @@ configRouter.get('/api/integracao/cadastros/:crmLeadId', requireApiKey, async (r
 const recebidos: unknown[] = [];
 configRouter.post('/api/crm-teste/webhook', (req, res) => {
   recebidos.unshift({ recebidoEm: new Date(), evento: req.headers['x-cadastros-evento'], corpo: req.body });
-  recebidos.length = Math.min(recebidos.length, 100);
+  recebidos.length = Math.min(recebidos.length, 500);
   res.json({ ok: true });
 });
 configRouter.get('/api/crm-teste/recebidos', requireAuth, (_req, res) => res.json(recebidos));
