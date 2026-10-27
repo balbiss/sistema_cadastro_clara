@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&display=swap');
+
+/* Mesma paleta do CRM Clara v2 (padrão Kommo + rosa/vinho da Clara). */
+:root {
+  --bg: #F5F5F5; --card: #FFFFFF; --card-2: #F0F2F4; --ink: #313942; --muted: #92989B; --line: #E3E5E8;
+  --terra: #c8506a; --terraSoft: #fbe9ee;
+  --olive: #7DBB2D; --oliveSoft: #EAF5DC;
+  --rosa: #f0d0d7; --vinho: #5a2433; --vinhoBtn: #8e2a46; --vinhoMuted: #85525f;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+html, body { overflow-x: clip; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'PT Sans', 'Segoe UI', Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+input, select, textarea, button { font-family: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .6; }
+a { color: var(--vinhoBtn); text-decoration: none; }
+a:hover { color: var(--ink); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--terra) !important; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes slideInLeft { from { transform: translateX(-100%); } to { transform: none; } }
+
+::-webkit-scrollbar { height: 10px; width: 10px; }
+::-webkit-scrollbar-thumb { background: #A9B6C8; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+
+.hoverable:hover { border-color: var(--terra) !important; }
+.linha:hover td { background: #fbf4f6; }
+.modal-card { background: var(--card); border-radius: 4px; }
+
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.grid-dossie { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .grid2, .grid-dossie { grid-template-columns: 1fr; } }
+
+.topbar-mobile { display: none !important; }
+@media (max-width: 900px) {
+  .app-sidebar { display: none !important; }
+  .content-col { margin-left: 0 !important; }
+  .topbar-mobile { display: flex !important; }
+  .app-main { padding: 14px !important; }
+  .k-login-brand { display: none !important; }
+  .k-login-panel { width: 100% !important; }
+}
+.tabela { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tabela th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fafafa; white-space: nowrap; }
+.tabela td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }

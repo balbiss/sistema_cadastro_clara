@@ -1,0 +1,216 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { Router } from 'express';
+import { z } from 'zod';
+import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { cadastros, consultasCredito, documentos, eventos, pendencias, users } from '../db/schema.js';
+import { exigir, PODE, requireAuth } from '../lib/auth.js';
+import { criarCadastro } from '../lib/cadastros.js';
+import { analisar, abrirPendencia } from '../lib/analise.js';
+import { linkDossie, linkFormulario, mudarStatus, registrarEvento } from '../lib/eventos.js';
+import { PASTA, comprovanteNoPrazo, situacaoDocs, tentarLiberar } from '../lib/documentos.js';
+import { DOC_NOME, STATUS, statusNome, type Status } from '../lib/status.js';
+import { soDigitos } from '../lib/util.js';
+
+export const cadastrosRouter = Router();
+cadastrosRouter.use('/api/cadastros', requireAuth);
+cadastrosRouter.use('/api/pendencias', requireAuth);
+cadastrosRouter.use('/api/documentos', requireAuth);
+
+const quem = (req: { user?: { name: string } }) => req.user?.name || 'sistema';
+
+async function carregar(id: number) {
+  const [c] = await db.select().from(cadastros).where(eq(cadastros.id, id)).limit(1);
+  return c;
+}
+
+// ---------- lista + contadores ----------
+cadastrosRouter.get('/api/cadastros/resumo', async (_req, res) => {
+  const porStatus = await db.select({ status: cadastros.status, n: sql<number>`count(*)::int` }).from(cadastros).groupBy(cadastros.status);
+  const [{ vencidos }] = await db.select({ vencidos: sql<number>`count(*)::int` }).from(cadastros)
+    .where(and(lt(cadastros.prazoEtapa, new Date()), inArray(cadastros.status, Object.keys(STATUS).filter(s => !['reprovado', 'desistencia', 'documentos_ok'].includes(s)))));
+  const [{ abertas }] = await db.select({ abertas: sql<number>`count(*)::int` }).from(pendencias).where(isNull(pendencias.resolvidaEm));
+  res.json({ status: STATUS, porStatus: Object.fromEntries(porStatus.map(r => [r.status, r.n])), vencidos, pendenciasAbertas: abertas });
+});
+
+cadastrosRouter.get('/api/cadastros', async (req, res) => {
+  const conds = [];
+  if (req.query.status) conds.push(eq(cadastros.status, String(req.query.status)));
+  if (req.query.vencidos === '1') conds.push(lt(cadastros.prazoEtapa, new Date()));
+  const q = String(req.query.q || '').trim();
+  if (q) {
+    const dig = soDigitos(q);
+    conds.push(or(ilike(cadastros.nome, `%${q}%`), ilike(cadastros.codigo, `%${q}%`), ...(dig ? [ilike(cadastros.cpf, `%${dig}%`), ilike(cadastros.telefone, `%${dig}%`)] : []))!);
+  }
+  const rows = await db.select().from(cadastros).where(conds.length ? and(...conds) : undefined).orderBy(desc(cadastros.updatedAt)).limit(300);
+  const ids = rows.map(r => r.id);
+  const pend = ids.length ? await db.select({ id: pendencias.cadastroId, n: sql<number>`count(*)::int` }).from(pendencias)
+    .where(and(inArray(pendencias.cadastroId, ids), isNull(pendencias.resolvidaEm))).groupBy(pendencias.cadastroId) : [];
+  const resp = ids.length ? await db.select({ id: users.id, name: users.name }).from(users) : [];
+  const pm = new Map(pend.map(p => [p.id, p.n]));
+  const um = new Map(resp.map(u => [u.id, u.name]));
+  res.json(rows.map(r => ({
+    id: r.id, codigo: r.codigo, nome: r.nome, cpf: r.cpf, telefone: r.telefone, consultora: r.consultoraNome, origem: r.origem,
+    status: r.status, statusNome: statusNome(r.status), motivo: r.motivo, etapaEntradaEm: r.etapaEntradaEm, prazoEtapa: r.prazoEtapa,
+    responsavel: r.responsavelId ? um.get(r.responsavelId) || null : null, pendencias: pm.get(r.id) || 0, createdAt: r.createdAt,
+    crmLeadId: r.crmLeadId,
+  })));
+});
+
+// ---------- novo cadastro (manual, quando o lead não veio do CRM) ----------
+cadastrosRouter.post('/api/cadastros', async (req, res) => {
+  const p = z.object({ nome: z.string().min(2), telefone: z.string().optional(), cpf: z.string().optional(), consultoraNome: z.string().optional(), origem: z.string().optional(), campanha: z.string().optional() }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: 'Informe pelo menos o nome' });
+  const c = await criarCadastro(p.data, quem(req));
+  res.json({ id: c.id, codigo: c.codigo, linkFormulario: linkFormulario(c) });
+});
+
+// ---------- dossiê (item 5) ----------
+cadastrosRouter.get('/api/cadastros/:id', async (req, res) => {
+  const c = await carregar(Number(req.params.id));
+  if (!c) return res.status(404).json({ error: 'Cadastro não encontrado' });
+  const [consultas, docs, pends, evs, equipe] = await Promise.all([
+    db.select().from(consultasCredito).where(eq(consultasCredito.cadastroId, c.id)).orderBy(desc(consultasCredito.id)),
+    db.select().from(documentos).where(eq(documentos.cadastroId, c.id)).orderBy(desc(documentos.id)),
+    db.select().from(pendencias).where(eq(pendencias.cadastroId, c.id)).orderBy(asc(pendencias.id)),
+    db.select().from(eventos).where(eq(eventos.cadastroId, c.id)).orderBy(desc(eventos.id)),
+    db.select({ id: users.id, name: users.name, role: users.role }).from(users).where(eq(users.active, true)),
+  ]);
+  const sd = situacaoDocs(c, docs);
+  res.json({
+    cadastro: { ...c, statusNome: statusNome(c.status), linkFormulario: linkFormulario(c), linkDossie: linkDossie(c) },
+    consultas, pendencias: pends, eventos: evs, equipe,
+    documentos: docs.map(d => ({ ...d, nome: DOC_NOME[d.tipo] || d.tipo })),
+    situacaoDocs: { situacao: sd.situacao, faltam: sd.faltam, itens: sd.itens.map(i => ({ tipo: i.tipo, nome: i.nome, docId: i.doc?.id ?? null, status: i.doc?.status ?? 'faltando' })) },
+    podeDecidir: PODE.decidir(req.user!),
+  });
+});
+
+// ---------- decisão manual (análise humana / contestação) ----------
+const DECISOES: Status[] = ['aprovado', 'aprovado_avalista', 'pendente_avalista', 'reprovado'];
+cadastrosRouter.post('/api/cadastros/:id/decisao', exigir(PODE.decidir, 'Só análise cadastral e diretoria decidem crédito'), async (req, res) => {
+  const p = z.object({ status: z.enum(DECISOES as [Status, ...Status[]]), motivo: z.string().min(3) }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: 'Escolha a decisão e escreva o motivo' });
+  const c = await carregar(Number(req.params.id));
+  if (!c) return res.status(404).end();
+  if (!['analise_humana', 'pendente_avalista', 'reprovado', 'aprovado', 'aprovado_avalista'].includes(c.status))
+    return res.status(409).json({ error: `Não dá pra decidir um cadastro em "${statusNome(c.status)}"` });
+  const novo = await mudarStatus(c, p.data.status, p.data.motivo, quem(req), { decididoPor: quem(req), decididoEm: new Date() });
+  await registrarEvento(c.id, 'decisao_manual', `Decisão manual: ${statusNome(p.data.status)} — ${p.data.motivo}`, quem(req), { de: c.status, para: p.data.status, motivo: p.data.motivo });
+  // decidiu → a pendência "Analisar cadastro" deixa de fazer sentido
+  if (c.status === 'analise_humana') await db.update(pendencias).set({ resolvidaEm: new Date(), resolvidaPor: quem(req) })
+    .where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm), ilike(pendencias.descricao, 'Analisar cadastro%')));
+  if (p.data.status === 'pendente_avalista') await abrirPendencia(c.id, 'Conseguir avalista com a cliente', quem(req));
+  res.json({ ok: true, status: novo.status });
+});
+
+cadastrosRouter.post('/api/cadastros/:id/reanalisar', exigir(PODE.decidir, 'Só análise cadastral e diretoria'), async (req, res) => {
+  const c = await carregar(Number(req.params.id));
+  if (!c) return res.status(404).end();
+  if (!c.formConcluidoEm) return res.status(409).json({ error: 'A cliente ainda não preencheu o formulário' });
+  await registrarEvento(c.id, 'reanalise', 'Análise automática refeita', quem(req));
+  const novo = await analisar(c, quem(req));
+  res.json({ ok: true, status: novo.status });
+});
+
+// Correção de dados (erro cadastral / contestação): guarda antes e depois.
+cadastrosRouter.patch('/api/cadastros/:id', async (req, res) => {
+  const c = await carregar(Number(req.params.id));
+  if (!c) return res.status(404).end();
+  const campos = ['nome', 'telefone', 'email', 'cpf', 'dataNascimento', 'endereco', 'avalista', 'modalidade', 'responsavelId', 'consultoraNome'] as const;
+  const mudou: Record<string, { antes: unknown; depois: unknown }> = {};
+  const set: Record<string, unknown> = {};
+  for (const k of campos) if (k in req.body && JSON.stringify(req.body[k]) !== JSON.stringify(c[k])) {
+    let v = req.body[k];
+    if (k === 'cpf' || k === 'telefone') v = soDigitos(v) || null;
+    mudou[k] = { antes: c[k], depois: v };
+    set[k] = v;
+  }
+  if (!Object.keys(set).length) return res.json({ ok: true });
+  await db.update(cadastros).set({ ...set, updatedAt: new Date() }).where(eq(cadastros.id, c.id));
+  if ('responsavelId' in set) {
+    // item 7: transferência registra quem entregou e quem recebeu
+    const nomes = await db.select({ id: users.id, name: users.name }).from(users);
+    const nm = (id: unknown) => nomes.find(u => u.id === id)?.name || 'ninguém';
+    await registrarEvento(c.id, 'responsavel_alterado', `Responsável: ${nm(c.responsavelId)} → ${nm(set.responsavelId)}`, quem(req), { de: c.responsavelId, para: set.responsavelId });
+    delete mudou.responsavelId;
+  }
+  if (Object.keys(mudou).length) await registrarEvento(c.id, 'dados_alterados', 'Dados corrigidos: ' + Object.keys(mudou).join(', '), quem(req), mudou);
+  res.json({ ok: true });
+});
+
+cadastrosRouter.post('/api/cadastros/:id/desistencia', async (req, res) => {
+  const motivo = String(req.body.motivo || '').trim();
+  if (motivo.length < 3) return res.status(400).json({ error: 'Escreva o motivo da desistência' });
+  const c = await carregar(Number(req.params.id));
+  if (!c) return res.status(404).end();
+  await mudarStatus(c, 'desistencia', motivo, quem(req));
+  res.json({ ok: true });
+});
+
+// ---------- documentos ----------
+cadastrosRouter.post('/api/documentos/:id/conferir', async (req, res) => {
+  const p = z.object({ status: z.enum(['conferido', 'recusado']), observacao: z.string().optional(), dataEmissao: z.string().optional() }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: 'Dados inválidos' });
+  const [d] = await db.select().from(documentos).where(eq(documentos.id, Number(req.params.id))).limit(1);
+  if (!d) return res.status(404).end();
+  const c = await carregar(d.cadastroId);
+  let { status, observacao } = p.data;
+  const ehComprovante = d.tipo.endsWith('comprovante_residencia');
+  if (status === 'conferido' && ehComprovante) {
+    if (!p.data.dataEmissao) return res.status(400).json({ error: 'Informe a data do comprovante de residência' });
+    if (!comprovanteNoPrazo(p.data.dataEmissao)) { status = 'recusado'; observacao = 'Comprovante com mais de 3 meses — envie um mais recente'; }
+  }
+  if (status === 'recusado' && !observacao) return res.status(400).json({ error: 'Diga o motivo da recusa (a cliente vai ver)' });
+  await db.update(documentos).set({ status, observacao: observacao || null, dataEmissao: p.data.dataEmissao || null, conferidoPor: quem(req), conferidoEm: new Date() }).where(eq(documentos.id, d.id));
+  const nome = DOC_NOME[d.tipo] || d.tipo;
+  if (status === 'recusado') {
+    await registrarEvento(c.id, 'documento_recusado', `${nome} recusado: ${observacao}`, quem(req), { tipo: d.tipo, motivo: observacao });
+    await abrirPendencia(c.id, `Reenviar ${nome}: ${observacao}`, quem(req));
+  } else {
+    await registrarEvento(c.id, 'documento_conferido', `${nome} conferido`, quem(req), { tipo: d.tipo });
+    await tentarLiberar(c, quem(req));
+  }
+  res.json({ ok: true, status });
+});
+
+cadastrosRouter.get('/api/documentos/:id/arquivo', async (req, res) => {
+  const [d] = await db.select().from(documentos).where(eq(documentos.id, Number(req.params.id))).limit(1);
+  if (!d) return res.status(404).end();
+  const caminho = path.join(PASTA, d.arquivo);
+  if (!caminho.startsWith(PASTA) || !fs.existsSync(caminho)) return res.status(404).end();
+  res.setHeader('Content-Type', d.mime || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(d.nomeOriginal || 'documento')}"`);
+  fs.createReadStream(caminho).pipe(res);
+});
+
+// ---------- pendências (item 3/7: responsável e prazo) ----------
+cadastrosRouter.post('/api/cadastros/:id/pendencias', async (req, res) => {
+  const p = z.object({ descricao: z.string().min(3), responsavelId: z.number().nullable().optional(), prazo: z.string().nullable().optional() }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: 'Descreva a pendência' });
+  const c = await carregar(Number(req.params.id));
+  if (!c) return res.status(404).end();
+  const pend = await abrirPendencia(c.id, p.data.descricao, quem(req), p.data.responsavelId, p.data.prazo);
+  res.json(pend);
+});
+
+cadastrosRouter.post('/api/pendencias/:id/resolver', async (req, res) => {
+  const [p] = await db.update(pendencias).set({ resolvidaEm: new Date(), resolvidaPor: quem(req) })
+    .where(and(eq(pendencias.id, Number(req.params.id)), isNull(pendencias.resolvidaEm))).returning();
+  if (!p) return res.status(404).json({ error: 'Pendência não encontrada ou já resolvida' });
+  await registrarEvento(p.cadastroId, 'pendencia_resolvida', 'Pendência resolvida: ' + p.descricao, quem(req), { pendencia_id: p.id });
+  const c = await carregar(p.cadastroId);
+  await tentarLiberar(c, quem(req));
+  res.json({ ok: true });
+});
+
+cadastrosRouter.get('/api/pendencias', async (req, res) => {
+  const rows = await db.select({
+    id: pendencias.id, descricao: pendencias.descricao, prazo: pendencias.prazo, responsavelId: pendencias.responsavelId, createdAt: pendencias.createdAt,
+    cadastroId: cadastros.id, codigo: cadastros.codigo, nome: cadastros.nome, status: cadastros.status,
+  }).from(pendencias).innerJoin(cadastros, eq(cadastros.id, pendencias.cadastroId))
+    .where(and(isNull(pendencias.resolvidaEm), req.query.minhas === '1' ? eq(pendencias.responsavelId, req.user!.id) : undefined))
+    .orderBy(asc(pendencias.prazo), asc(pendencias.id));
+  res.json(rows.map(r => ({ ...r, statusNome: statusNome(r.status) })));
+});
