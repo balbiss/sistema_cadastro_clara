@@ -34,6 +34,44 @@ cadastrosRouter.get('/api/cadastros/resumo', async (_req, res) => {
   res.json({ status: STATUS, porStatus: Object.fromEntries(porStatus.map(r => [r.status, r.n])), vencidos, pendenciasAbertas: abertas });
 });
 
+// Painel: números do setor, o que precisa de atenção agora e as últimas movimentações.
+const FINAIS = ['reprovado', 'desistencia', 'documentos_ok'];
+cadastrosRouter.get('/api/cadastros/painel', async (_req, res) => {
+  const agora = new Date();
+  const porStatus = Object.fromEntries((await db.select({ status: cadastros.status, n: sql<number>`count(*)::int` }).from(cadastros).groupBy(cadastros.status)).map(r => [r.status, r.n]));
+  const [tempos] = await db.select({
+    horas: sql<number>`coalesce(avg(extract(epoch from (${cadastros.decididoEm} - ${cadastros.formConcluidoEm})) / 3600), 0)::float`,
+    novos30: sql<number>`count(*) filter (where ${cadastros.createdAt} > now() - interval '30 days')::int`,
+  }).from(cadastros);
+  const docsAConferir = await db.selectDistinct({ id: documentos.cadastroId }).from(documentos).where(eq(documentos.status, 'enviado'));
+  const docsIds = new Set(docsAConferir.map(d => d.id));
+  const [{ abertas }] = await db.select({ abertas: sql<number>`count(*)::int` }).from(pendencias).where(isNull(pendencias.resolvidaEm));
+
+  const candidatos = await db.select().from(cadastros).where(sql`${cadastros.status} not in ('reprovado','desistencia','documentos_ok')`).orderBy(asc(cadastros.prazoEtapa)).limit(300);
+  const atencao = candidatos.map(c => {
+    const vencido = !!c.prazoEtapa && c.prazoEtapa < agora;
+    const razao = c.status === 'analise_humana' ? 'Aguardando decisão' : docsIds.has(c.id) ? 'Documentos para conferir' : vencido ? 'Prazo vencido' : null;
+    return razao ? { id: c.id, codigo: c.codigo, nome: c.nome, status: c.status, motivo: c.motivo, prazoEtapa: c.prazoEtapa, vencido, razao } : null;
+  }).filter(Boolean).slice(0, 8);
+
+  const recentes = await db.select({ id: eventos.id, tipo: eventos.tipo, descricao: eventos.descricao, autor: eventos.autor, createdAt: eventos.createdAt, cadastroId: cadastros.id, nome: cadastros.nome })
+    .from(eventos).innerJoin(cadastros, eq(cadastros.id, eventos.cadastroId))
+    .where(inArray(eventos.tipo, ['status_alterado', 'decisao_manual', 'documento_conferido', 'documento_recusado', 'documentos_recebidos', 'formulario_enviado', 'avalista_informado']))
+    .orderBy(desc(eventos.id)).limit(6);
+
+  const total = Object.values(porStatus).reduce((a, b) => a + b, 0);
+  const aprovados = ['aprovado', 'aprovado_avalista', 'documentos_ok'].reduce((a, k) => a + (porStatus[k] || 0), 0);
+  res.json({
+    porStatus, total, aprovados, reprovados: porStatus.reprovado || 0,
+    emAndamento: total - FINAIS.reduce((a, k) => a + (porStatus[k] || 0), 0),
+    taxaAprovacao: aprovados + (porStatus.reprovado || 0) ? aprovados / (aprovados + (porStatus.reprovado || 0)) : null,
+    horasMediasDecisao: tempos.horas, novos30: tempos.novos30,
+    vencidos: candidatos.filter(c => c.prazoEtapa && c.prazoEtapa < agora).length,
+    pendenciasAbertas: abertas, docsAConferir: docsIds.size,
+    atencao, recentes,
+  });
+});
+
 cadastrosRouter.get('/api/cadastros', async (req, res) => {
   const conds = [];
   if (req.query.status) conds.push(eq(cadastros.status, String(req.query.status)));

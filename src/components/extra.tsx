@@ -26,7 +26,7 @@ export function PageHeader({ title, subtitle, right }: { title: ReactNode; subti
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 18 }}>
       <div style={{ minWidth: 0 }}>
-        <h1 style={{ fontFamily: "'PT Sans', Arial, sans-serif", fontWeight: 700, fontSize: 24, margin: 0, color: 'var(--ink)' }}>{title}</h1>
+        <h1 style={{ fontWeight: 700, fontSize: 26, margin: 0, color: '#5a2433' }}>{title}</h1>
         {subtitle && <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: 14 }}>{subtitle}</p>}
       </div>
       {right && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{right}</div>}

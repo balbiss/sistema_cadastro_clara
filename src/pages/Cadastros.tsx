@@ -55,7 +55,12 @@ export default function Cadastros() {
                 {linhas.map(l => (
                   <tr key={l.id} className="linha" onClick={() => nav('/cadastros/' + l.id)} style={{ cursor: 'pointer' }}>
                     <td style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}>{l.codigo}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}><b>{l.nome}</b><div style={{ fontSize: 12, color: 'var(--muted)' }}>{telFmt(l.telefone)}</div></td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ width: 32, height: 32, borderRadius: '50%', background: '#fbe9ee', color: '#8e2a46', fontWeight: 700, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{l.nome.split(' ').filter(Boolean).map(p => p[0]).slice(0, 2).join('').toUpperCase()}</span>
+                        <div><b>{l.nome}</b><div style={{ fontSize: 12, color: 'var(--muted)' }}>{telFmt(l.telefone)}</div></div>
+                      </div>
+                    </td>
                     <td style={{ whiteSpace: 'nowrap' }}>{l.cpf ? cpfFmt(l.cpf) : '—'}</td>
                     <td>{l.consultora || '—'}</td>
                     <td>{l.origem || '—'}</td>
@@ -86,7 +91,7 @@ function Chip({ on, onClick, cor, children }: { on: boolean; onClick: () => void
 }
 
 /** Cadastro aberto aqui mesmo (quando o lead não veio do CRM). Gera o link pra mandar à cliente. */
-function NovoCadastro({ onClose, onCriado }: { onClose: () => void; onCriado: () => void }) {
+export function NovoCadastro({ onClose, onCriado }: { onClose: () => void; onCriado: () => void }) {
   const [f, setF] = useState({ nome: '', telefone: '', consultoraNome: '', origem: 'Prospecção ativa', campanha: '' })
   const [link, setLink] = useState('')
   const [salvando, setSalvando] = useState(false)

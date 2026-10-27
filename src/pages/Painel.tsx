@@ -1,62 +1,164 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ListChecks } from 'lucide-react'
-import { api } from '../lib/api'
-import { ORDEM, STATUS } from '../lib/status'
-import { Card } from '../components/ui'
-import { Carregando, PageHeader } from '../components/extra'
+import { Activity, AlertTriangle, CheckCircle2, ChevronRight, Clock, FileSearch, ListChecks, Plus, TrendingUp, UserCheck } from 'lucide-react'
+import { api, usuarioAtual } from '../lib/api'
+import { STATUS } from '../lib/status'
+import { btn } from '../components/ui'
+import { Carregando, StatusPill } from '../components/extra'
+import { NovoCadastro } from './Cadastros'
 
-type Resumo = { porStatus: Record<string, number>; vencidos: number; pendenciasAbertas: number }
+// Painel no padrão do Início do CRM v2: saudação em vinho, quadros de números (o 1º em rosa),
+// blocos com ícone. Mostra onde os cadastros estão e o que precisa de alguém agora.
+const ROSA = '#c8506a'
+const VINHO = '#5a2433'
+const box: CSSProperties = { background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '16px 18px', minWidth: 0 }
+const saudacao = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite' }
+const ha = (iso: string) => {
+  const min = Math.max(0, Math.round((Date.now() - +new Date(iso)) / 60000))
+  if (min < 60) return `há ${min} min`
+  const h = Math.floor(min / 60); if (h < 24) return `há ${h} h`
+  const d = Math.floor(h / 24); return `há ${d} ${d === 1 ? 'dia' : 'dias'}`
+}
+const duracao = (h: number) => (!h ? '—' : h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} dias`)
+const iniciais = (n: string) => n.split(' ').filter(Boolean).map(p => p[0]).slice(0, 2).join('').toUpperCase()
 
-// Visão do setor (item 8 "Controle operacional"): quantos cadastros em cada etapa, prazos vencidos
-// e pendências abertas. Os indicadores completos ficam no CRM, que recebe todos os avisos.
+// caminho do cadastro (onde cada um está agora)
+const ETAPAS: { chave: string; nome: string; status: string[] }[] = [
+  { chave: 'enviado', nome: 'Formulário enviado', status: ['formulario_enviado'] },
+  { chave: 'analise', nome: 'Em análise', status: ['formulario_preenchido', 'analise_humana'] },
+  { chave: 'avalista', nome: 'Aguardando avalista', status: ['pendente_avalista'] },
+  { chave: 'aprovado', nome: 'Aprovados — documentos', status: ['aprovado', 'aprovado_avalista'] },
+  { chave: 'ok', nome: 'Documentação conferida', status: ['documentos_ok'] },
+]
+const COR_ETAPA: Record<string, string> = { enviado: STATUS.formulario_enviado.cor, analise: STATUS.analise_humana.cor, avalista: STATUS.pendente_avalista.cor, aprovado: STATUS.aprovado.cor, ok: STATUS.documentos_ok.cor }
+const RAZAO: Record<string, { cor: string; fundo: string }> = {
+  'Aguardando decisão': { cor: '#4b4fb8', fundo: '#eceefe' },
+  'Documentos para conferir': { cor: '#1f6fb2', fundo: '#e6f1fb' },
+  'Prazo vencido': { cor: '#c0392b', fundo: '#fdecea' },
+}
+
 export default function Painel() {
   const nav = useNavigate()
-  const [r, setR] = useState<Resumo | null>(null)
-  useEffect(() => { api('GET', '/cadastros/resumo').then(setR) }, [])
-  if (!r) return <Carregando />
-  const total = Object.values(r.porStatus).reduce((a, b) => a + b, 0)
-  const conv = (s: string[]) => s.reduce((a, k) => a + (r.porStatus[k] || 0), 0)
-  const aprovados = conv(['aprovado', 'aprovado_avalista', 'documentos_ok'])
-  const decididos = aprovados + conv(['reprovado'])
+  const eu = usuarioAtual()
+  const [d, setD] = useState<any>(null)
+  const [novo, setNovo] = useState(false)
+  const carregar = () => api('GET', '/cadastros/painel').then(setD)
+  useEffect(() => { carregar(); const t = setInterval(carregar, 30_000); return () => clearInterval(t) }, [])
+  if (!d) return <Carregando />
+  const dataLonga = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
+  const soma = (s: string[]) => s.reduce((a, k) => a + (d.porStatus[k] || 0), 0)
 
   return (
     <div>
-      <PageHeader title="Painel" subtitle="Situação dos cadastros de novas revendedoras" />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 16 }}>
-        <Indicador titulo="Cadastros" valor={total} />
-        <Indicador titulo="Aprovados" valor={aprovados} detalhe={decididos ? `${Math.round((aprovados / decididos) * 100)}% dos decididos` : undefined} />
-        <Indicador titulo="Prazos vencidos" valor={r.vencidos} alerta={r.vencidos > 0} onClick={() => nav('/cadastros?vencidos=1')} icone={<AlertTriangle size={16} />} />
-        <Indicador titulo="Pendências abertas" valor={r.pendenciasAbertas} alerta={r.pendenciasAbertas > 0} onClick={() => nav('/pendencias')} icone={<ListChecks size={16} />} />
-      </div>
-      <Card title="Cadastros por etapa">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {ORDEM.map(s => {
-            const n = r.porStatus[s] || 0
+      <header style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
+        <div style={{ flex: '1 1 260px' }}>
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: VINHO }}>{saudacao()}, {eu?.name.split(' ')[0]}!</h1>
+          <div style={{ color: 'var(--muted)', fontSize: 14.5, marginTop: 2 }}>{dataLonga.charAt(0).toUpperCase() + dataLonga.slice(1)} · novos cadastros de revendedoras</div>
+        </div>
+        <button style={btn('ghost')} onClick={() => nav('/cadastros')}>Ver cadastros</button>
+        <button style={btn('primary')} onClick={() => setNovo(true)}><Plus size={16} /> Novo cadastro</button>
+      </header>
+
+      <section className="numeros" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+        <Numero destaque titulo="Em andamento" valor={d.emAndamento} icone={<Activity size={17} />} rodape={`${d.novos30} novos nos últimos 30 dias`} onClick={() => nav('/cadastros')} />
+        <Numero titulo="Aprovados" valor={d.aprovados} icone={<UserCheck size={17} />} rodape={d.taxaAprovacao == null ? 'nenhum decidido ainda' : `${Math.round(d.taxaAprovacao * 100)}% de aprovação`} />
+        <Numero titulo="Tempo até a decisão" valor={duracao(d.horasMediasDecisao)} icone={<Clock size={17} />} rodape="média do formulário à decisão" />
+        <Numero titulo="Documentos a conferir" valor={d.docsAConferir} icone={<FileSearch size={17} />} rodape="cadastros com arquivo novo" alerta={d.docsAConferir > 0} />
+        <Numero titulo="Pendências abertas" valor={d.pendenciasAbertas} icone={<ListChecks size={17} />} onClick={() => nav('/pendencias')}
+          rodape={d.vencidos ? <span style={{ color: '#c0392b', fontWeight: 700 }}>{d.vencidos} com prazo vencido</span> : 'nenhum prazo vencido'} alerta={d.vencidos > 0} />
+      </section>
+
+      <Bloco titulo="Caminho do cadastro" icone={<TrendingUp size={18} />}
+        extra={<span style={{ fontSize: 13, color: 'var(--muted)' }}>{d.total} no total · {d.reprovados} reprovado(s) · {d.porStatus.desistencia || 0} desistência(s)</span>}>
+        <div className="caminho" style={{ display: 'grid', gridTemplateColumns: `repeat(${ETAPAS.length}, minmax(0, 1fr))`, gap: 0, marginTop: 4 }}>
+          {ETAPAS.map((e, i) => {
+            const n = soma(e.status)
             return (
-              <button key={s} onClick={() => nav('/cadastros?status=' + s)} className="hoverable"
-                style={{ display: 'grid', gridTemplateColumns: '210px 1fr 50px', alignItems: 'center', gap: 12, padding: '6px 8px', border: '1px solid transparent', borderRadius: 3, background: 'none', textAlign: 'left' }}>
-                <span style={{ fontSize: 13.5 }}>{STATUS[s].nome}</span>
-                <span style={{ height: 14, background: 'var(--card-2)', borderRadius: 2, overflow: 'hidden' }}>
-                  <span style={{ display: 'block', height: '100%', width: total ? `${(n / total) * 100}%` : 0, minWidth: n ? 6 : 0, background: STATUS[s].cor, borderRight: n ? '1px solid rgba(0,0,0,.12)' : 'none' }} />
-                </span>
-                <b style={{ textAlign: 'right' }}>{n}</b>
+              <button key={e.chave} onClick={() => nav('/cadastros' + (e.status.length === 1 ? '?status=' + e.status[0] : ''))} className="etapa"
+                style={{ position: 'relative', border: 'none', background: 'none', textAlign: 'left', padding: '0 18px 0 0', cursor: 'pointer' }}>
+                <div style={{ height: 6, borderRadius: 3, background: COR_ETAPA[e.chave], border: '1px solid rgba(0,0,0,.06)' }} />
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 12 }}>
+                  <span style={{ fontSize: 30, fontWeight: 700, color: n ? VINHO : '#c9cdd1', lineHeight: 1 }}>{n}</span>
+                  <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{d.total ? Math.round((n / d.total) * 100) : 0}%</span>
+                </div>
+                <div style={{ fontSize: 13.5, marginTop: 4, color: 'var(--ink)' }}>{e.nome}</div>
+                {i < ETAPAS.length - 1 && <ChevronRight size={16} color="#c9cdd1" style={{ position: 'absolute', right: 2, top: 26 }} />}
               </button>
             )
           })}
         </div>
-      </Card>
+      </Bloco>
+
+      <div className="grid-dossie" style={{ marginTop: 16 }}>
+        <Bloco titulo="Precisa da sua atenção" icone={<AlertTriangle size={18} />} extra={<span style={{ fontSize: 13, color: 'var(--muted)' }}>{d.atencao.length} cadastro(s)</span>}>
+          {!d.atencao.length ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--muted)', fontSize: 14, padding: '14px 0' }}><CheckCircle2 size={20} color="#3c8d0d" /> Tudo em dia — nenhum cadastro esperando por alguém.</div>
+          ) : d.atencao.map((c: any) => (
+            <button key={c.id} onClick={() => nav('/cadastros/' + c.id)} className="linha-atencao"
+              style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '11px 4px', border: 'none', borderTop: '1px solid var(--line)', background: 'none', textAlign: 'left', cursor: 'pointer' }}>
+              <span style={{ width: 36, height: 36, borderRadius: '50%', background: '#fbe9ee', color: '#8e2a46', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{iniciais(c.nome)}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <b style={{ fontSize: 14.5 }}>{c.nome}</b>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{c.codigo}</span>
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.motivo || STATUS[c.status]?.nome}</div>
+              </div>
+              <span style={{ flex: 'none', fontSize: 12, fontWeight: 700, padding: '3px 9px', borderRadius: 12, color: RAZAO[c.razao].cor, background: RAZAO[c.razao].fundo, whiteSpace: 'nowrap' }}>{c.razao}</span>
+              <ChevronRight size={16} color="var(--muted)" style={{ flex: 'none' }} />
+            </button>
+          ))}
+        </Bloco>
+
+        <Bloco titulo="Últimas movimentações" icone={<Activity size={18} />}>
+          {!d.recentes.length ? <div style={{ color: 'var(--muted)', fontSize: 14 }}>Nada ainda.</div> : (
+            <div style={{ position: 'relative' }}>
+              {d.recentes.map((ev: any, i: number) => (
+                <div key={ev.id} style={{ display: 'flex', gap: 12, paddingBottom: 14, position: 'relative' }}>
+                  <div style={{ flex: 'none', width: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: i === 0 ? ROSA : '#e3c3cb', marginTop: 5 }} />
+                    {i < d.recentes.length - 1 && <span style={{ flex: 1, width: 1, background: 'var(--line)', marginTop: 3 }} />}
+                  </div>
+                  <div style={{ minWidth: 0, fontSize: 13.5 }}>
+                    <button onClick={() => nav('/cadastros/' + ev.cadastroId)} style={{ border: 'none', background: 'none', padding: 0, fontWeight: 700, color: '#8e2a46', fontSize: 13.5 }}>{ev.nome}</button>
+                    <div style={{ color: 'var(--ink)' }}>{ev.descricao}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>{ha(ev.createdAt)} · {ev.autor}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Bloco>
+      </div>
+      {novo && <NovoCadastro onClose={() => setNovo(false)} onCriado={carregar} />}
     </div>
   )
 }
 
-function Indicador({ titulo, valor, detalhe, alerta, onClick, icone }: { titulo: string; valor: number; detalhe?: string; alerta?: boolean; onClick?: () => void; icone?: React.ReactNode }) {
+function Bloco({ titulo, icone, extra, children }: { titulo: string; icone: ReactNode; extra?: ReactNode; children: ReactNode }) {
   return (
-    <div onClick={onClick} className={onClick ? 'hoverable' : undefined}
-      style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 3, padding: '14px 16px', cursor: onClick ? 'pointer' : undefined }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: alerta ? '#d93025' : 'var(--muted)' }}>{icone}{titulo}</div>
-      <div style={{ fontSize: 30, fontWeight: 700, marginTop: 4, color: alerta ? '#d93025' : 'var(--ink)' }}>{valor}</div>
-      {detalhe && <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{detalhe}</div>}
+    <section aria-label={titulo} style={box}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <span style={{ color: ROSA, display: 'flex' }}>{icone}</span>
+        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', flex: 1 }}>{titulo}</h2>
+        {extra}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function Numero({ titulo, valor, icone, rodape, destaque, alerta, onClick }: { titulo: string; valor: ReactNode; icone: ReactNode; rodape?: ReactNode; destaque?: boolean; alerta?: boolean; onClick?: () => void }) {
+  const cor = destaque ? '#fff' : VINHO
+  return (
+    <div onClick={onClick} className={onClick && !destaque ? 'hoverable' : undefined}
+      style={{ ...box, padding: '14px 16px', cursor: onClick ? 'pointer' : undefined, background: destaque ? `linear-gradient(135deg, ${ROSA} 0%, #a93d58 100%)` : '#fff', borderColor: destaque ? ROSA : alerta ? '#f3c3c9' : 'var(--line)', boxShadow: destaque ? '0 6px 18px rgba(169,61,88,.25)' : '0 1px 2px rgba(16,24,40,.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: destaque ? 'rgba(255,255,255,.9)' : 'var(--muted)' }}>{titulo}</span>
+        <span style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: destaque ? 'rgba(255,255,255,.2)' : alerta ? '#fdecea' : '#fbe9ee', color: destaque ? '#fff' : alerta ? '#c0392b' : ROSA }}>{icone}</span>
+      </div>
+      <div style={{ fontSize: 30, fontWeight: 700, color: cor, marginTop: 6, lineHeight: 1.1 }}>{valor}</div>
+      {rodape && <div style={{ fontSize: 12.5, marginTop: 4, color: destaque ? 'rgba(255,255,255,.88)' : 'var(--muted)' }}>{rodape}</div>}
     </div>
   )
 }
