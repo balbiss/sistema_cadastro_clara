@@ -32,6 +32,15 @@ function nomesBatem(a?: string | null, b?: string | null) {
   return x[0] === y[0] && x[x.length - 1] === y[y.length - 1];
 }
 
+/** aceita AAAA-MM-DD, DD/MM/AAAA, DD-MM-AAAA ou MM/AAAA (conta de consumo) e devolve AAAA-MM-DD */
+function dataIso(v?: string | null) {
+  const t = String(v || '').trim();
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = t.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  m = t.match(/^(\d{1,2})[/.-](\d{4})$/); if (m) return `${m[2]}-${m[1].padStart(2, '0')}-01`;
+  return null;
+}
+
 async function lerArquivo(arquivo: string) {
   const s = await ler(arquivo.replace(/\\/g, '/'));
   if (!s) return null;
@@ -67,6 +76,9 @@ export async function conferirComIa(docId: number, autor = IA) {
     const j: any = await r.json();
     if (!r.ok) throw new Error(j?.error?.message || 'OpenAI ' + r.status);
     resultado.extraido = JSON.parse(j.choices[0].message.content);
+    const ex = resultado.extraido!;
+    ex.data_nascimento = dataIso(ex.data_nascimento) || undefined;
+    ex.data_emissao = dataIso(ex.data_emissao) || undefined;
   } catch (e) {
     resultado.erro = (e as Error).message;
   }
