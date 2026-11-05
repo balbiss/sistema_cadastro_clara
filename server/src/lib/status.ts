@@ -1,5 +1,6 @@
 // Situações do cadastro. O CRM recebe o `status` em todo aviso e usa pra mover o card no funil.
 export const STATUS = {
+  quiz_aprovado: 'Perfil aprovado (quiz)',
   formulario_enviado: 'Formulário enviado',
   formulario_preenchido: 'Formulário preenchido',
   pendente_avalista: 'Pendente de avalista',

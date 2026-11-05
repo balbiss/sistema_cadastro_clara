@@ -24,6 +24,7 @@ const iniciais = (n: string) => n.split(' ').filter(Boolean).map(p => p[0]).slic
 
 // caminho do cadastro (onde cada um está agora)
 const ETAPAS: { chave: string; nome: string; status: string[] }[] = [
+  { chave: 'quiz', nome: 'Perfil aprovado (quiz)', status: ['quiz_aprovado'] },
   { chave: 'enviado', nome: 'Formulário enviado', status: ['formulario_enviado'] },
   { chave: 'analise', nome: 'Em análise', status: ['formulario_preenchido', 'analise_humana'] },
   { chave: 'avalista', nome: 'Aguardando avalista', status: ['pendente_avalista'] },
@@ -32,7 +33,7 @@ const ETAPAS: { chave: string; nome: string; status: string[] }[] = [
   { chave: 'inicializacao', nome: 'Em inicialização', status: ['inicializacao'] },
   { chave: 'iniciada', nome: 'Iniciadas', status: ['iniciada'] },
 ]
-const COR_ETAPA: Record<string, string> = { enviado: STATUS.formulario_enviado.cor, analise: STATUS.analise_humana.cor, avalista: STATUS.pendente_avalista.cor, aprovado: STATUS.aprovado.cor, assinatura: STATUS.aguardando_assinatura.cor, inicializacao: STATUS.inicializacao.cor, iniciada: STATUS.iniciada.cor }
+const COR_ETAPA: Record<string, string> = { quiz: STATUS.quiz_aprovado.cor, enviado: STATUS.formulario_enviado.cor, analise: STATUS.analise_humana.cor, avalista: STATUS.pendente_avalista.cor, aprovado: STATUS.aprovado.cor, assinatura: STATUS.aguardando_assinatura.cor, inicializacao: STATUS.inicializacao.cor, iniciada: STATUS.iniciada.cor }
 const RAZAO: Record<string, { cor: string; fundo: string }> = {
   'Aguardando decisão': { cor: '#4b4fb8', fundo: '#eceefe' },
   'Documentos para conferir': { cor: '#1f6fb2', fundo: '#e6f1fb' },

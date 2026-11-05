@@ -20,6 +20,7 @@ export function resumoParaCrm(c: Cadastro) {
     status: c.status, status_nome: statusNome(c.status), motivo: c.motivo, decidido_por: c.decididoPor,
     modalidade: c.modalidade, valor_credito: c.valorCredito, liberado_em: c.liberadoEm, inicializacao_etapa: c.inicEtapa,
     inicializacao: c.inicializacao, iniciada_em: c.iniciadaEm, etapa_entrada_em: c.etapaEntradaEm, prazo_etapa: c.prazoEtapa,
+    cidade: c.cidade, quiz: c.quiz ? { pontos: c.quiz.pontos, respostas: c.quiz.itens.map(i => ({ pergunta: i.pergunta, resposta: i.resposta })) } : null,
     link_formulario: linkFormulario(c), link_dossie: linkDossie(c),
   };
 }

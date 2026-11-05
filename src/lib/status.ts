@@ -1,5 +1,6 @@
 // Mesmos códigos do servidor; cores pastel das etapas do Kommo (as mesmas do funil do CRM).
 export const STATUS: Record<string, { nome: string; cor: string }> = {
+  quiz_aprovado: { nome: 'Perfil aprovado (quiz)', cor: '#99ccff' },
   formulario_enviado: { nome: 'Formulário enviado', cor: '#fffeb2' },
   formulario_preenchido: { nome: 'Formulário preenchido', cor: '#ffcc66' },
   pendente_avalista: { nome: 'Pendente de avalista', cor: '#ffc8c8' },

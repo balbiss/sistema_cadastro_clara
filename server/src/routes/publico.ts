@@ -26,7 +26,7 @@ async function porToken(token: string) {
 
 // A cliente vê só o necessário: nunca o resultado do SPC nem o motivo interno.
 function etapaCliente(status: string) {
-  if (status === 'formulario_enviado') return 'formulario';
+  if (status === 'formulario_enviado' || status === 'quiz_aprovado') return 'formulario';
   if (status === 'pendente_avalista') return 'avalista';
   if (['aprovado', 'aprovado_avalista'].includes(status)) return 'documentos';
   if (status === 'aguardando_assinatura') return 'assinatura';
@@ -79,7 +79,7 @@ const formulario = z.object({
 publicoRouter.post('/api/publico/:token/formulario', async (req, res) => {
   const c = await porToken(req.params.token);
   if (!c) return res.status(404).json({ error: 'Link inválido' });
-  if (c.status !== 'formulario_enviado') return res.status(409).json({ error: 'Este formulário já foi enviado' });
+  if (c.status !== 'formulario_enviado' && c.status !== 'quiz_aprovado') return res.status(409).json({ error: 'Este formulário já foi enviado' });
   const p = formulario.safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Confira os campos obrigatórios', detalhes: p.error.flatten() });
   const d = p.data;

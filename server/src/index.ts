@@ -5,6 +5,7 @@ import { initDb } from './db/client.js';
 import { publicoRouter } from './routes/publico.js';
 import { cadastrosRouter } from './routes/cadastros.js';
 import { configRouter } from './routes/config.js';
+import { quizRouter } from './routes/quiz.js';
 import { iniciarFilaCrm } from './lib/eventos.js';
 import { iniciarStorage } from './lib/storage.js';
 
@@ -16,6 +17,7 @@ app.use(cors({ origin: (process.env.CORS_ORIGIN || 'http://localhost:5185').spli
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/up', (_req, res) => res.json({ ok: true }));
+app.use(quizRouter);
 app.use(publicoRouter);
 app.use(configRouter);
 app.use(cadastrosRouter);

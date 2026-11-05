@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ClipboardCheck, FileSignature, Home, ListChecks, LogOut, Menu, PackageCheck, PanelLeft, PlugZap, SlidersHorizontal, Users, X } from 'lucide-react'
+import { ClipboardCheck, FileSignature, Home, ListChecks, LogOut, Menu, PackageCheck, PanelLeft, PlugZap, SlidersHorizontal, Users, X, Sparkles } from 'lucide-react'
 import { api, usuarioAtual } from '../lib/api'
 import { CARGO } from '../lib/status'
 import { ClaraLogo } from './extra'
@@ -11,6 +11,7 @@ const SB = { bg: '#f0d0d7', text: '#4a2430', muted: '#85525f', line: 'rgba(90,36
 type Item = { path: string; label: string; icon: typeof Home; badge?: 'pendencias' | 'analise' | 'inicializacao'; soDiretoria?: boolean }
 const NAV: Item[] = [
   { path: '/', label: 'Painel', icon: Home },
+  { path: '/quiz-perfil', label: 'Quiz de perfil', icon: Sparkles },
   { path: '/cadastros', label: 'Cadastros', icon: ClipboardCheck, badge: 'analise' },
   { path: '/inicializacao', label: 'Inicialização', icon: PackageCheck, badge: 'inicializacao' },
   { path: '/pendencias', label: 'Pendências', icon: ListChecks, badge: 'pendencias' },

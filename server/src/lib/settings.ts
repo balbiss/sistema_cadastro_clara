@@ -39,6 +39,7 @@ export const REGRAS_PADRAO: Regras = {
 // Prazo de cada etapa em horas (item 3/10 do briefing). Passou do prazo = pendência vencida.
 export type Prazos = Record<string, number>;
 export const PRAZOS_PADRAO: Prazos = {
+  quiz_aprovado: 24, // consultora chama a cliente que passou no quiz
   formulario_enviado: 48,
   pendente_avalista: 72,
   analise_humana: 24,

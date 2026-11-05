@@ -16,6 +16,8 @@ import FormularioPublico from './pages/FormularioPublico'
 import Inicializacao from './pages/Inicializacao'
 import Modelos from './pages/Modelos'
 import Assinar from './pages/Assinar'
+import Quiz from './pages/Quiz'
+import QuizConfig from './pages/QuizConfig'
 
 const Logado = ({ children }: { children: ReactNode }) => (tokenAtual() ? <>{children}</> : <Navigate to="/login" replace />)
 
@@ -26,8 +28,10 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/login" element={<Login />} />
         <Route path="/f/:token" element={<FormularioPublico />} />
         <Route path="/assinar/:token" element={<Assinar />} />
+        <Route path="/quiz" element={<Quiz />} />
         <Route element={<Logado><AppShell /></Logado>}>
           <Route path="/" element={<Painel />} />
+          <Route path="/quiz-perfil" element={<QuizConfig />} />
           <Route path="/cadastros" element={<Cadastros />} />
           <Route path="/cadastros/:id" element={<CadastroDetalhe />} />
           <Route path="/inicializacao" element={<Inicializacao />} />

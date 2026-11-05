@@ -8,7 +8,7 @@ import { cadastros, eventos, users } from '../db/schema.js';
 import { assinarToken, exigir, PODE, requireApiKey, requireAuth } from '../lib/auth.js';
 import { CENARIOS_PADRAO, MODELOS_PADRAO, PRAZOS_PADRAO, REGRAS_PADRAO, getCenarios, getIntegracao, getModelos, getPrazos, getRegras, setSetting } from '../lib/settings.js';
 import { criarCadastro } from '../lib/cadastros.js';
-import { enviarPendentesAoCrm, linkFormulario, resumoParaCrm } from '../lib/eventos.js';
+import { enviarPendentesAoCrm, linkFormulario, mudarStatus, resumoParaCrm } from '../lib/eventos.js';
 import { ACOES, STATUS } from '../lib/status.js';
 
 export const configRouter = Router();
@@ -116,10 +116,22 @@ configRouter.post('/api/integracao/cadastros', requireApiKey, async (req, res) =
     crm_lead_id: z.union([z.string(), z.number()]).transform(String), crm_contact_id: z.union([z.string(), z.number()]).transform(String).optional(),
     nome: z.string().min(2), telefone: z.string().optional(), email: z.string().optional(), cpf: z.string().optional(),
     consultora: z.string().optional(), origem: z.string().optional(), campanha: z.string().optional(),
+    cadastro_id: z.coerce.number().int().optional(), // veio do aviso quiz_aprovado: continua o MESMO cadastro
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Campos obrigatórios: crm_lead_id e nome', detalhes: p.error.flatten() });
   const d = p.data;
-  const [existe] = await db.select().from(cadastros).where(eq(cadastros.crmLeadId, d.crm_lead_id)).limit(1);
+  let [existe] = await db.select().from(cadastros).where(eq(cadastros.crmLeadId, d.crm_lead_id)).limit(1);
+  if (!existe && d.cadastro_id) {
+    const [doQuiz] = await db.select().from(cadastros).where(eq(cadastros.id, d.cadastro_id)).limit(1);
+    if (doQuiz && (!doQuiz.crmLeadId || doQuiz.crmLeadId === d.crm_lead_id)) {
+      await db.update(cadastros).set({ crmLeadId: d.crm_lead_id, crmContactId: d.crm_contact_id || doQuiz.crmContactId, consultoraNome: d.consultora || doQuiz.consultoraNome, updatedAt: new Date() }).where(eq(cadastros.id, doQuiz.id));
+      existe = { ...doQuiz, crmLeadId: d.crm_lead_id, consultoraNome: d.consultora || doQuiz.consultoraNome };
+    }
+  }
+  // cadastro do quiz: a consultora mandou o formulário completo → passa pra "Formulário enviado"
+  if (existe?.status === 'quiz_aprovado') {
+    existe = await mudarStatus(existe, 'formulario_enviado', null, d.consultora || 'CRM', { formEnviadoEm: new Date() });
+  }
   const c = existe || await criarCadastro({ nome: d.nome, telefone: d.telefone, email: d.email, cpf: d.cpf, crmLeadId: d.crm_lead_id, crmContactId: d.crm_contact_id,
     consultoraNome: d.consultora, origem: d.origem, campanha: d.campanha }, 'CRM');
   res.status(existe ? 200 : 201).json({ ...resumoParaCrm(c), ja_existia: !!existe, link_formulario: linkFormulario(c) });

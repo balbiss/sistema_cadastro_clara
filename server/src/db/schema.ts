@@ -69,6 +69,9 @@ export const cadastros = pgTable('cadastros', {
   inicEtapa: text('inic_etapa'), // sub-etapa da inicialização (ver lib/inicializacao.ts)
   inicializacao: jsonb('inicializacao').$type<Inicializacao>(),
   iniciadaEm: timestamp('iniciada_em', { withTimezone: true }),
+  // resumo do quiz de perfil (1ª etapa), quando o cadastro nasceu dele
+  quiz: jsonb('quiz').$type<{ respostaId: number; pontos: number; itens: { pergunta: string; resposta: string; pontos: number }[] }>(),
+  cidade: text('cidade'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -158,6 +161,24 @@ export const assinaturas = pgTable('assinaturas', {
 });
 
 // SQL de criação (o banco local é o PGlite — Postgres dentro do Node, sem Docker).
+// Toda resposta do quiz de perfil (aprovada ou não) — base do relatório do quiz.
+export const quizRespostas = pgTable('quiz_respostas', {
+  id: serial('id').primaryKey(),
+  nome: text('nome').notNull(),
+  telefone: text('telefone').notNull(),
+  cidade: text('cidade'),
+  respostas: jsonb('respostas').$type<Record<string, string>>().notNull(),
+  itens: jsonb('itens').$type<{ pergunta: string; resposta: string; pontos: number }[]>().notNull(),
+  pontos: integer('pontos').notNull(),
+  aprovado: boolean('aprovado').notNull(),
+  eliminatorias: jsonb('eliminatorias').$type<string[]>(),
+  origem: text('origem'),
+  campanha: text('campanha'),
+  cadastroId: integer('cadastro_id'),
+  ip: text('ip'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const DDL = `
 CREATE TABLE IF NOT EXISTS users (
   id serial PRIMARY KEY, name text NOT NULL, email text NOT NULL UNIQUE, password_hash text NOT NULL,
@@ -194,6 +215,13 @@ ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS liberado_em timestamptz;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS inic_etapa text;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS inicializacao jsonb;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS iniciada_em timestamptz;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS quiz jsonb;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS cidade text;
+CREATE TABLE IF NOT EXISTS quiz_respostas (
+  id serial PRIMARY KEY, nome text NOT NULL, telefone text NOT NULL, cidade text, respostas jsonb NOT NULL, itens jsonb NOT NULL,
+  pontos integer NOT NULL, aprovado boolean NOT NULL, eliminatorias jsonb, origem text, campanha text, cadastro_id integer, ip text,
+  created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS quiz_respostas_tel_idx ON quiz_respostas (telefone);
 CREATE TABLE IF NOT EXISTS formalizacoes (
   id serial PRIMARY KEY, cadastro_id integer NOT NULL, versao integer NOT NULL, contrato text NOT NULL, promissoria text NOT NULL,
   valor integer NOT NULL, hash text NOT NULL, provedor text NOT NULL, criado_por text, cancelada_em timestamptz, concluida_em timestamptz,

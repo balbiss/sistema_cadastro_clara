@@ -173,7 +173,15 @@ export default function CadastroDetalhe() {
             <Field label="Início" value={c.modalidade === 'online' ? 'Online (envio)' : c.modalidade === 'presencial' ? 'Presencial (matriz)' : '—'} />
             <Field label="Consultora" value={c.consultoraNome || '—'} empty={!c.consultoraNome} />
             <Field label="Origem" value={[c.origem, c.campanha].filter(Boolean).join(' · ') || '—'} empty={!c.origem} />
+            {c.cidade && <Field label="Cidade (quiz)" value={c.cidade} />}
           </Card>
+          {c.quiz && <Card title="Quiz de perfil" right={<span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--vinho)' }}>{c.quiz.pontos} pontos</span>}>
+            {c.quiz.itens.map((i: any, k: number) => (
+              <div key={k} style={{ padding: '6px 0', borderBottom: '1px dashed var(--line)', fontSize: 13.5 }}>
+                <div style={{ color: 'var(--muted)', fontSize: 12.5 }}>{i.pergunta}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>{i.resposta}</span><span style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}>{i.pontos} pt</span></div>
+              </div>))}
+          </Card>}
           <Card title="Avalista">
             {!av?.nome ? <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>{c.temAvalista === false ? 'Sem avalista.' : 'Não informado.'}</p> : <>
               <Field label="Nome" value={av.nome} />
