@@ -439,9 +439,10 @@ function JueriCard({ c, onAtualizado }: { c: D; onAtualizado: () => void }) {
         {linha('Pedidos / acertos', `${j.pedidos} pedido(s) · ${j.acertos} acerto(s)`)}
         {linha('Último pedido', j.ultimoPedido ? dataBR(j.ultimoPedido) : '—')}
         {linha('Situação hoje', j.ativa ? `Ativa (${j.pecasAbertas} peças abertas)` : `Sem maleta ativa (${j.pecasAbertas} peças abertas)`, j.ativa ? '#3c8d0d' : '#8a5a00')}
-        {linha('Faturamento (venda real)', j.faturamento != null ? brl(j.faturamento) : 'sem dado de venda no Jueri')}
-        {linha('Valor das maletas (consignado)', brl(j.valorConsignado))}
-        <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '8px 0 0' }}>Atualizado {dataHoraBR(j.atualizadoEm)}. O valor consignado não é venda — o LTV usa só o faturamento real.</p>
+        {linha('Faturamento (vendido nos acertos)', brl(j.faturamento || 0), '#3c8d0d')}
+        {j.comissao != null && linha('Comissão dela', brl(j.comissao))}
+        {linha('Valor das maletas levadas (consignado)', brl(j.valorConsignado))}
+        <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '8px 0 0' }}>Atualizado {dataHoraBR(j.atualizadoEm)}. Faturamento = o que ela vendeu de fato (valor depois da baixa em cada acerto). O valor das maletas não é venda.</p>
       </>}
     </Card>)
 }

@@ -197,7 +197,8 @@ export type ResumoJueri = {
   pedidos: number; acertos: number; ultimoPedido: string | null;
   pecasAbertas: number; ativa: boolean;
   valorConsignado: number; // soma do valor das maletas (NÃO é venda — só referência)
-  faturamento: number | null; // venda real (null = Jueri não entregou dado de venda dessa revendedora)
+  faturamento: number | null; // venda real: soma do valor vendido nos acertos (pedido baixado, valor depois da baixa)
+  comissao?: number;
   perdidos: { n: number; valor: number }; acertoAtrasadoDias: number; inadimplente: boolean;
 };
 

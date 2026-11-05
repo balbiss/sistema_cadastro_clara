@@ -182,8 +182,8 @@ function Carteira({ d }: { d: any }) {
         <Numero t="Ativas hoje" v={k.ativasHoje} sub={k.ligadasJueri ? pct(k.ativasHoje, k.ligadasJueri) + ' das ligadas' : undefined} />
         <Numero t="Inadimplentes" v={k.inadimplentes} sub={k.ligadasJueri ? pct(k.inadimplentes, k.ligadasJueri) + ' das ligadas' : undefined} />
         <Numero t="Pedidos por revendedora" v={k.pedidosMedio == null ? '—' : k.pedidosMedio.toFixed(1).replace('.', ',')} />
-        <Numero t="Faturamento (venda real)" v={brlR(k.faturamento)} sub={k.faturamento == null ? 'Jueri ainda sem dado de venda' : `${k.comDadoDeVenda} com dado de venda`} />
-        <Numero t="LTV médio" v={brlR(k.ltv)} sub="sobre venda real, não consignado" />
+        <Numero t="Faturamento" v={brlR(k.faturamento)} sub="vendido nos acertos" />
+        <Numero t="LTV médio" v={brlR(k.ltv)} sub="venda real por revendedora" />
       </div>
     </Card>)
 }

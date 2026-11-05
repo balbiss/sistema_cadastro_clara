@@ -44,10 +44,13 @@ async function paginado(path: string, extra: Record<string, any> = {}) {
 const dia = (s: any): string | null => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(s ?? '')); return m ? m[1] : null; };
 const num = (v: any) => (v == null || v === '' ? 0 : Number(String(v).replace(',', '.')) || 0);
 const status = (p: any) => ('status' in p && typeof p.status === 'string' ? LABEL[p.status] ?? ABERTO : [1, 2, 3, 4].includes(Number(p.fk_status_pedido_id)) ? Number(p.fk_status_pedido_id) : ABERTO);
-const pecas = (p: any) => num(p.quantidade_antes_baixa) || num(p.quantidade);
+const pecas = (p: any) => num(p.quantidade_antes_baixa) || num(p.quantidade); // tamanho da maleta
+// No pedido BAIXADO (acerto feito) o Jueri guarda a maleta em *_antes_baixa e o que ela VENDEU em quantidade/valor_total
+// (conferido com dados reais em 05/11: comissão = 30–50% do valor_total depois da baixa).
+const valorMaleta = (p: any) => num(p.valor_total_antes_baixa) || num(p.valor_total);
 
-/** Resumo do desempenho a partir dos pedidos (e das vendas, se o Jueri entregar). */
-export function resumir(nome: string | undefined, pedidos: any[], vendas: any[] | null, hoje = new Date()): ResumoJueri {
+/** Resumo do desempenho a partir dos pedidos do Jueri. */
+export function resumir(nome: string | undefined, pedidos: any[], hoje = new Date()): ResumoJueri {
   const validos = pedidos.filter(p => status(p) !== CANCELADO).sort((a, b) => String(a.data_criacao).localeCompare(String(b.data_criacao)));
   const abertos = validos.filter(p => status(p) === ABERTO);
   const perdidos = validos.filter(p => status(p) === PERDIDO);
@@ -59,24 +62,17 @@ export function resumir(nome: string | undefined, pedidos: any[], vendas: any[] 
   const p1 = validos[0];
   return {
     atualizadoEm: hoje.toISOString(), nome,
-    primeiraCarga: p1 ? { data: dia(p1.data_criacao), pecas: pecas(p1), valor: p1.valor_total != null ? num(p1.valor_total) : null } : null,
+    primeiraCarga: p1 ? { data: dia(p1.data_criacao), pecas: pecas(p1), valor: valorMaleta(p1) || null } : null,
     pedidos: validos.length, acertos: validos.filter(p => status(p) === BAIXADO).length,
     ultimoPedido: validos.length ? dia(validos[validos.length - 1].data_criacao) : null,
     pecasAbertas, ativa: pecasAbertas > MIN_PECAS(),
-    valorConsignado: Math.round(validos.reduce((s, p) => s + num(p.valor_total), 0) * 100) / 100,
-    faturamento: vendas ? Math.round(vendas.reduce((s, v) => s + num(v.valor_total ?? v.valor ?? v.total), 0) * 100) / 100 : null,
-    perdidos: { n: perdidos.length, valor: Math.round(perdidos.reduce((s, p) => s + num(p.valor_total), 0) * 100) / 100 },
+    valorConsignado: Math.round(validos.reduce((s, p) => s + valorMaleta(p), 0) * 100) / 100,
+    // venda real = o que ela vendeu nos acertos (valor depois da baixa) — nunca o valor da maleta
+    faturamento: Math.round(validos.filter(p => status(p) === BAIXADO).reduce((s, p) => s + num(p.valor_total), 0) * 100) / 100,
+    comissao: Math.round(validos.filter(p => status(p) === BAIXADO).reduce((s, p) => s + num(p.valor_comissao), 0) * 100) / 100,
+    perdidos: { n: perdidos.length, valor: Math.round(perdidos.reduce((s, p) => s + valorMaleta(p), 0) * 100) / 100 },
     acertoAtrasadoDias: atraso, inadimplente: perdidos.length > 0 || atraso >= ATRASO_INADIMPLENTE(),
   };
-}
-
-/** Vendas da revendedora — só confia se o Jueri devolver mesmo as vendas DELA (filtro respeitado). */
-async function vendasDe(id: string): Promise<any[] | null> {
-  try {
-    const lista = await paginado('/venda', { fk_revendedor_id: id });
-    if (!lista.length) return [];
-    return lista.every(v => String(v.fk_revendedor_id ?? '') === id) ? lista : null;
-  } catch { return null; }
 }
 
 let rodando = false;
@@ -121,7 +117,7 @@ export async function sincronizarJueri(somenteCadastroId?: number) {
     }
     for (const c of ligados) {
       const nome = [...porCpf.values()].find(r => String(r.id) === c.jueriId)?.nome || c.jueri?.nome;
-      const resumo = resumir(nome, porRev.get(c.jueriId!) || [], await vendasDe(c.jueriId!));
+      const resumo = resumir(nome, porRev.get(c.jueriId!) || []);
       const antes = c.jueri;
       await db.update(cadastros).set({ jueri: resumo }).where(eq(cadastros.id, c.id));
       if (resumo.inadimplente && !antes?.inadimplente)

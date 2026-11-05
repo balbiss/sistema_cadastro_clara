@@ -96,8 +96,8 @@ const d10 = n => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10)
 await req('POST', '/api/jueri-mock/seed', { body: {
   revendedores: [{ id: Number(jid), nome: 'RITA DA ANA', cpf: cpfA.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4') }, { id: 1, nome: 'Outra', cpf: '111.444.777-35' }],
   pedidos: [
-    { id: 1001, fk_revendedor_id: Number(jid), data_criacao: d10(60), status: 'Baixado', quantidade: 10, quantidade_antes_baixa: 80, valor_total: '3200.00' },
-    { id: 1002, fk_revendedor_id: Number(jid), data_criacao: d10(30), status: 'Baixado', quantidade: 5, quantidade_antes_baixa: 90, valor_total: '3600.00' },
+    { id: 1001, fk_revendedor_id: Number(jid), data_criacao: d10(60), status: 'Baixado', quantidade: 10, quantidade_antes_baixa: 80, valor_total_antes_baixa: '3200.00', valor_total: '1250.50', valor_comissao: '625.25' },
+    { id: 1002, fk_revendedor_id: Number(jid), data_criacao: d10(30), status: 'Baixado', quantidade: 5, quantidade_antes_baixa: 90, valor_total_antes_baixa: '3600.00', valor_total: '980.00', valor_comissao: '294.00' },
     { id: 1003, fk_revendedor_id: Number(jid), data_criacao: d10(5), status: 'Aberto', quantidade: 70, valor_total: '2800.00', data_acerto: d10(-25) },
     { id: 1004, fk_revendedor_id: Number(jid), data_criacao: d10(2), status: 'Cancelado', quantidade: 50, valor_total: '2000.00' },
     { id: 2001, fk_revendedor_id: 1, data_criacao: d10(10), status: 'Aberto', quantidade: 40, valor_total: '1500.00' },
@@ -112,7 +112,7 @@ const j = d.cadastro.jueri;
 t('1ª carga = pedido mais antigo (80 peças, R$ 3.200)', j?.primeiraCarga?.pecas === 80 && j.primeiraCarga.valor === 3200, j?.primeiraCarga);
 t('pedidos e acertos (cancelado não conta)', j?.pedidos === 3 && j.acertos === 2, j);
 t('ativa hoje (70 peças abertas > 25)', j?.ativa === true && j.pecasAbertas === 70, j);
-t('faturamento = soma das VENDAS dela (não o consignado)', j?.faturamento === 2230.5 && j.valorConsignado === 9600, j);
+t('faturamento = valor VENDIDO nos acertos (não a maleta)', j?.faturamento === 2230.5 && j.valorConsignado === 9600 && j.comissao === 919.25, j);
 t('sem perdido nem atraso → adimplente', j?.inadimplente === false);
 t('histórico registra a ligação', d.eventos.some(e => e.tipo === 'jueri_vinculado'));
 
@@ -120,7 +120,7 @@ t('histórico registra a ligação', d.eventos.some(e => e.tipo === 'jueri_vincu
 await req('POST', '/api/jueri-mock/seed', { body: {
   revendedores: [{ id: Number(jid), nome: 'RITA DA ANA', cpf: cpfA }],
   pedidos: [
-    { id: 1001, fk_revendedor_id: Number(jid), data_criacao: d10(60), status: 'Baixado', quantidade_antes_baixa: 80, valor_total: '3200.00' },
+    { id: 1001, fk_revendedor_id: Number(jid), data_criacao: d10(60), status: 'Baixado', quantidade: 12, quantidade_antes_baixa: 80, valor_total_antes_baixa: '3200.00', valor_total: '500.00' },
     { id: 1003, fk_revendedor_id: Number(jid), data_criacao: d10(45), status: 'Aberto', quantidade: 20, valor_total: '800.00', data_acerto: d10(20) },
     { id: 1005, fk_revendedor_id: Number(jid), data_criacao: d10(40), status: 'Perdido', quantidade: 30, valor_total: '1200.00' },
   ], vendas: [] } });
@@ -130,7 +130,7 @@ d = (await req('GET', '/api/cadastros/' + A.id, { token: dir })).json;
 const j2 = d.cadastro.jueri;
 t('inadimplente: 1 perdido + acerto 20 dias atrasado', j2.inadimplente === true && j2.perdidos.n === 1 && j2.acertoAtrasadoDias === 20, j2);
 t('sem maleta ativa (20 peças ≤ 25)', j2.ativa === false);
-t('sem venda no Jueri → faturamento vazio (não usa consignado)', j2.faturamento === 0 || j2.faturamento === null, j2.faturamento);
+t('faturamento só do acerto feito (aberto/perdido não contam como venda)', j2.faturamento === 500, j2.faturamento);
 t('histórico avisa a inadimplência', d.eventos.some(e => e.tipo === 'jueri_inadimplente'));
 t('consultora não atualiza Jueri de cadastro alheio', (await req('POST', `/api/operacao/jueri/cadastro/${B.id}`, { token: cons })).status === 404);
 
