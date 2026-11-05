@@ -16,7 +16,9 @@ export const STATUS: Record<string, { nome: string; cor: string }> = {
 }
 export const ORDEM = Object.keys(STATUS)
 export const ACAO_NOME: Record<string, string> = { pendente_avalista: 'Pedir avalista', analise_humana: 'Mandar pra análise humana', reprovar: 'Reprovar' }
-export const CARGO: Record<string, string> = { diretoria: 'Diretoria', analise: 'Análise cadastral', administrativo: 'Administrativo / documental' }
+export const CARGO: Record<string, string> = { diretoria: 'Diretoria', analise: 'Análise cadastral', administrativo: 'Administrativo / documental', logistica: 'Operação / Logística', consultora: 'Comercial / Consultora' }
+/** O que cada cargo vê no menu (sem a chave = todos). */
+export const RESTRITOS = ['logistica', 'consultora']
 export const SETORES: Record<string, string> = {
   prospeccao: 'Prospecção', analise: 'Análise cadastral', administrativo: 'Administrativo / documental',
   logistica: 'Operação / Logística', comercial: 'Comercial / Consultoras', gestao: 'Gestão',

@@ -8,16 +8,17 @@ import { ClaraLogo } from './extra'
 // Casca igual à do CRM Clara v2: menu lateral no rosa da Clara, texto/logo vinho, item ativo em branco.
 const SB = { bg: '#f0d0d7', text: '#4a2430', muted: '#85525f', line: 'rgba(90,36,51,.14)', activeBg: '#ffffff', active: '#8e2a46', logo: '#5a2433' }
 
-type Item = { path: string; label: string; icon: typeof Home; badge?: 'pendencias' | 'analise' | 'inicializacao'; soDiretoria?: boolean }
+type Item = { path: string; label: string; icon: typeof Home; badge?: 'pendencias' | 'analise' | 'inicializacao'; soDiretoria?: boolean; cargos?: string[] }
+const EQUIPE_CADASTRO = ['diretoria', 'analise', 'administrativo']
 const NAV: Item[] = [
-  { path: '/', label: 'Painel', icon: Home },
-  { path: '/quiz-perfil', label: 'Quiz de perfil', icon: Sparkles },
-  { path: '/cadastros', label: 'Cadastros', icon: ClipboardCheck, badge: 'analise' },
+  { path: '/', label: 'Painel', icon: Home, cargos: [...EQUIPE_CADASTRO, 'consultora'] },
+  { path: '/quiz-perfil', label: 'Quiz de perfil', icon: Sparkles, cargos: EQUIPE_CADASTRO },
+  { path: '/cadastros', label: 'Cadastros', icon: ClipboardCheck, badge: 'analise', cargos: [...EQUIPE_CADASTRO, 'consultora'] },
   { path: '/inicializacao', label: 'Inicialização', icon: PackageCheck, badge: 'inicializacao' },
   { path: '/pendencias', label: 'Pendências', icon: ListChecks, badge: 'pendencias' },
-  { path: '/relatorios', label: 'Relatórios', icon: BarChart3 },
-  { path: '/regras', label: 'Regras de análise', icon: SlidersHorizontal },
-  { path: '/modelos', label: 'Contrato e promissória', icon: FileSignature },
+  { path: '/relatorios', label: 'Relatórios', icon: BarChart3, cargos: EQUIPE_CADASTRO },
+  { path: '/regras', label: 'Regras de análise', icon: SlidersHorizontal, cargos: EQUIPE_CADASTRO },
+  { path: '/modelos', label: 'Contrato e promissória', icon: FileSignature, cargos: EQUIPE_CADASTRO },
   { path: '/operacao', label: 'Setores, alertas e LGPD', icon: Network, soDiretoria: true },
   { path: '/integracao', label: 'Integração com o CRM', icon: PlugZap, soDiretoria: true },
   { path: '/usuarios', label: 'Usuários', icon: Users, soDiretoria: true },
@@ -39,7 +40,7 @@ export function AppShell() {
   }, [pathname])
   useEffect(() => setMobile(false), [pathname])
 
-  const itens = NAV.filter(i => !i.soDiretoria || user?.role === 'diretoria')
+  const itens = NAV.filter(i => (!i.soDiretoria || user?.role === 'diretoria') && (!i.cargos || i.cargos.includes(user?.role || '')))
   const ativo = (p: string) => (p === '/' ? pathname === '/' : pathname.startsWith(p))
   const sair = () => { localStorage.removeItem('cad_token'); localStorage.removeItem('cad_user'); window.location.href = '/login' }
   const alternar = () => setAberto(o => { localStorage.setItem('cad_sidebar', o ? 'fechado' : 'aberto'); return !o })

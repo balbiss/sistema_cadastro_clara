@@ -92,11 +92,16 @@ export default function Relatorios() {
           </div>
         </div>
 
+        <Carteira d={d} />
         <Tabela titulo="Por origem" linhas={d.porOrigem} />
         <Tabela titulo="Por consultora" linhas={d.porConsultora} />
         <Tabela titulo="Presencial × online" linhas={d.porModalidade} />
         <Tabela titulo="Por safra (mês de entrada)" linhas={d.porSafra.map((s: any) => ({ ...s, nome: mesBR(s.nome) }))}
           ajuda="Cada linha é a turma que entrou naquele mês e o que aconteceu com ela até hoje." />
+
+        <TabelaCarteira titulo="Resultado depois de iniciada — por safra" linhas={d.porSafra.map((s: any) => ({ ...s, nome: mesBR(s.nome) }))} />
+        <TabelaCarteira titulo="Resultado depois de iniciada — por origem" linhas={d.porOrigem} />
+        <TabelaCarteira titulo="Resultado depois de iniciada — por consultora" linhas={d.porConsultora} />
 
         <div className="grid2" style={{ alignItems: 'start', marginTop: 16 }}>
           <Motivos titulo="Motivos de reprovação" itens={d.motivosReprovacao} />
@@ -162,5 +167,42 @@ function Motivos({ titulo, itens }: { titulo: string; itens: { motivo: string; n
           <div key={m.motivo} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--line)', fontSize: 13.5 }}>
             <span>{m.motivo}</span><b>{m.n}</b></div>))}
       </div>
+    </Card>)
+}
+
+const brlR = (v: number | null) => (v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }))
+/** Resultado da carteira (Jueri): o que as revendedoras iniciadas no período fizeram depois. */
+function Carteira({ d }: { d: any }) {
+  const k = d.carteira
+  return (
+    <Card title="Resultado da carteira (Jueri)" style={{ marginTop: 16 }} right={<span style={{ fontSize: 12, color: 'var(--muted)' }}>
+      {!d.jueri.configurado ? 'Jueri não configurado' : d.jueri.ultimaSync ? 'Atualizado ' + new Date(d.jueri.ultimaSync.em).toLocaleString('pt-BR') : 'Aguardando 1ª sincronização'}</span>}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', padding: '12px 16px' }}>
+        <Numero t="Iniciadas" v={k.iniciadas} sub={`${k.ligadasJueri} ligadas ao Jueri`} />
+        <Numero t="Ativas hoje" v={k.ativasHoje} sub={k.ligadasJueri ? pct(k.ativasHoje, k.ligadasJueri) + ' das ligadas' : undefined} />
+        <Numero t="Inadimplentes" v={k.inadimplentes} sub={k.ligadasJueri ? pct(k.inadimplentes, k.ligadasJueri) + ' das ligadas' : undefined} />
+        <Numero t="Pedidos por revendedora" v={k.pedidosMedio == null ? '—' : k.pedidosMedio.toFixed(1).replace('.', ',')} />
+        <Numero t="Faturamento (venda real)" v={brlR(k.faturamento)} sub={k.faturamento == null ? 'Jueri ainda sem dado de venda' : `${k.comDadoDeVenda} com dado de venda`} />
+        <Numero t="LTV médio" v={brlR(k.ltv)} sub="sobre venda real, não consignado" />
+      </div>
+    </Card>)
+}
+function TabelaCarteira({ titulo, linhas }: { titulo: string; linhas: any[] }) {
+  const com = linhas.filter(l => l.carteira?.iniciadas)
+  return (
+    <Card title={titulo} style={{ marginTop: 16 }}>
+      {!com.length ? <div style={vazio}>Nenhuma revendedora iniciada nesse recorte.</div> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>{['', 'Iniciadas', 'No Jueri', 'Ativas hoje', 'Inadimplentes', 'Pedidos/rev.', '1ª carga média', 'Faturamento', 'LTV'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{com.map(l => { const k = l.carteira; return (
+              <tr key={l.nome}>
+                <td style={{ ...td, fontWeight: 700 }}>{l.nome}</td><td style={td}>{k.iniciadas}</td><td style={td}>{k.ligadasJueri}</td>
+                <td style={td}>{k.ativasHoje}</td><td style={{ ...td, color: k.inadimplentes ? '#c0392b' : undefined, fontWeight: k.inadimplentes ? 700 : 400 }}>{k.inadimplentes}</td>
+                <td style={td}>{k.pedidosMedio == null ? '—' : k.pedidosMedio.toFixed(1).replace('.', ',')}</td>
+                <td style={td}>{brlR(k.primeiraCargaMedia)}</td><td style={td}>{brlR(k.faturamento)}</td><td style={{ ...td, fontWeight: 700, color: VINHO }}>{brlR(k.ltv)}</td>
+              </tr>) })}</tbody>
+          </table>
+        </div>)}
     </Card>)
 }

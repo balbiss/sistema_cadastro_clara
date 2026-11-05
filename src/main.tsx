@@ -2,7 +2,7 @@ import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './index.css'
-import { tokenAtual } from './lib/api'
+import { tokenAtual, usuarioAtual } from './lib/api'
 import { AppShell } from './components/AppShell'
 import Login from './pages/Login'
 import Painel from './pages/Painel'
@@ -22,6 +22,8 @@ import Relatorios from './pages/Relatorios'
 import Operacao from './pages/Operacao'
 
 const Logado = ({ children }: { children: ReactNode }) => (tokenAtual() ? <>{children}</> : <Navigate to="/login" replace />)
+// Logística só trabalha na fila de inicialização
+const Inicio = () => (usuarioAtual()?.role === 'logistica' ? <Navigate to="/inicializacao" replace /> : <Painel />)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -32,7 +34,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/assinar/:token" element={<Assinar />} />
         <Route path="/quiz" element={<Quiz />} />
         <Route element={<Logado><AppShell /></Logado>}>
-          <Route path="/" element={<Painel />} />
+          <Route path="/" element={<Inicio />} />
           <Route path="/quiz-perfil" element={<QuizConfig />} />
           <Route path="/cadastros" element={<Cadastros />} />
           <Route path="/cadastros/:id" element={<CadastroDetalhe />} />

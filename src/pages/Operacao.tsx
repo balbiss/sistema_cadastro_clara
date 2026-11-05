@@ -81,6 +81,14 @@ export default function Operacao() {
               <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '8px 0 0' }}>"Parado" = passou do prazo da etapa (Regras de análise → prazos).</p>
             </div>
           </Card>
+          <Card title="Integração com o Jueri" right={d.jueri.configurado && <button style={btn('ghost', { minHeight: 28 })} onClick={async () => {
+            try { const r = await api('POST', '/operacao/jueri/sincronizar'); toast(r.erro ? r.erro : `Jueri: ${r.vinculados} ligada(s), ${r.atualizados} atualizada(s)`, r.erro ? 'error' : 'success'); carregar() } catch (e) { toast((e as Error).message, 'error') } }}>Sincronizar agora</button>}>
+            <div style={{ padding: '10px 16px 12px', fontSize: 13.5 }}>
+              <p style={{ margin: '0 0 8px', color: d.jueri.configurado ? '#3c8d0d' : '#b42318', fontWeight: 700 }}>{d.jueri.configurado ? '✓ Jueri configurado' : '✗ Falta configurar o acesso ao Jueri no servidor'}</p>
+              <p style={{ margin: 0, color: 'var(--muted)' }}>Revendedora liberada/iniciada é ligada ao Jueri pelo CPF; a cada 6 horas o sistema lê 1ª carga, pedidos, acertos, peças abertas e inadimplência (só leitura).</p>
+              {d.jueri.ultimaSync && <p style={{ margin: '8px 0 0' }}>Última: {new Date(d.jueri.ultimaSync.em).toLocaleString('pt-BR')} — {d.jueri.ultimaSync.erro ? <span style={{ color: '#b42318' }}>{d.jueri.ultimaSync.erro}</span> : `${d.jueri.ultimaSync.vinculados} ligada(s), ${d.jueri.ultimaSync.atualizados} atualizada(s)`}</p>}
+            </div>
+          </Card>
           <Card title="IA na conferência de documentos">
             <div style={{ padding: '4px 16px 12px' }}>
               {linha('Ligada', <input type="checkbox" checked={d.operacao.ia} onChange={e => setOp('ia', e.target.checked)} />,

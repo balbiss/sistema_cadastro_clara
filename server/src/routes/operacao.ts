@@ -7,6 +7,8 @@ import { exigir, PODE, requireAuth } from '../lib/auth.js';
 import { rodarAlertas } from '../lib/alertas.js';
 import { iaDisponivel } from '../lib/ia.js';
 import { descartar, previaDescarte } from '../lib/lgpd.js';
+import { jueriConfigurado, sincronizarJueri, ultimaSync } from '../lib/jueri.js';
+import { podeVer } from '../lib/escopo.js';
 import { FINAIS, STATUS, statusNome } from '../lib/status.js';
 import { SETORES, getLgpd, getOperacao, getSetores, setSetting, type Lgpd } from '../lib/settings.js';
 
@@ -17,9 +19,10 @@ operacaoRouter.use('/api/relatorios', requireAuth);
 const soDiretoria = exigir(PODE.configurar, 'Só a diretoria mexe nessas configurações');
 const quem = (req: { user?: { name: string } }) => req.user?.name || 'sistema';
 
-operacaoRouter.get('/api/operacao/config', async (_req, res) => {
+operacaoRouter.get('/api/operacao/config', soDiretoria, async (_req, res) => {
   const [setores, operacao, lgpd, equipe] = await Promise.all([getSetores(), getOperacao(), getLgpd(), db.select({ id: users.id, name: users.name, role: users.role, active: users.active }).from(users)]);
-  res.json({ setores, nomesSetores: SETORES, etapas: STATUS, operacao, lgpd, equipe: equipe.filter(u => u.active), iaDisponivel: iaDisponivel(), previa: await previaDescarte(lgpd) });
+  res.json({ setores, nomesSetores: SETORES, etapas: STATUS, operacao, lgpd, equipe: equipe.filter(u => u.active), iaDisponivel: iaDisponivel(), previa: await previaDescarte(lgpd),
+    jueri: { configurado: jueriConfigurado(), ultimaSync } });
 });
 
 operacaoRouter.put('/api/operacao/config', soDiretoria, async (req, res) => {
@@ -36,6 +39,19 @@ operacaoRouter.put('/api/operacao/config', soDiretoria, async (req, res) => {
   res.json({ ok: true, previa: await previaDescarte(p.data.lgpd as Lgpd) });
 });
 
+operacaoRouter.post('/api/operacao/jueri/sincronizar', exigir(PODE.relatorios, 'Sem permissão'), async (_req, res) => {
+  if (!jueriConfigurado()) return res.status(400).json({ error: 'Jueri não configurado no servidor' });
+  res.json(await sincronizarJueri());
+});
+operacaoRouter.post('/api/operacao/jueri/cadastro/:id', async (req, res) => {
+  if (!jueriConfigurado()) return res.status(400).json({ error: 'Jueri não configurado no servidor' });
+  const [c] = await db.select().from(cadastros).where(eq(cadastros.id, Number(req.params.id))).limit(1);
+  if (!c || !podeVer(req.user!, c)) return res.status(404).json({ error: 'Cadastro não encontrado' });
+  if (!['inicializacao', 'iniciada'].includes(c.status)) return res.status(409).json({ error: 'Só revendedora liberada/iniciada é ligada ao Jueri' });
+  const r = await sincronizarJueri(c.id);
+  const [atual] = await db.select({ jueriId: cadastros.jueriId, jueri: cadastros.jueri }).from(cadastros).where(eq(cadastros.id, c.id));
+  res.json({ ...r, ...atual });
+});
 operacaoRouter.post('/api/operacao/alertas/rodar', soDiretoria, async (_req, res) => res.json(await rodarAlertas()));
 operacaoRouter.post('/api/operacao/lgpd/descartar', soDiretoria, async (req, res) => {
   const l = await getLgpd();
@@ -49,7 +65,7 @@ const DOCS_OK = ['documentos_ok', 'aguardando_assinatura', 'inicializacao', 'ini
 const horas = (a?: Date | null, b?: Date | null) => (a && b ? (+b - +a) / 3600_000 : null);
 const media = (xs: (number | null)[]) => { const v = xs.filter((x): x is number => x != null && x >= 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
 
-operacaoRouter.get('/api/relatorios', async (req, res) => {
+operacaoRouter.get('/api/relatorios', exigir(PODE.relatorios, 'Relatórios: só diretoria, análise e administrativo'), async (req, res) => {
   const ate = req.query.ate ? new Date(String(req.query.ate) + 'T23:59:59') : new Date();
   const de = req.query.de ? new Date(String(req.query.de) + 'T00:00:00') : new Date(+ate - 90 * 86400_000);
   const conds = [gte(cadastros.createdAt, de), lte(cadastros.createdAt, ate)];
@@ -110,6 +126,22 @@ operacaoRouter.get('/api/relatorios', async (req, res) => {
     { nome: 'Entrada → iniciada (total)', horas: media(lista.map(c => horas(c.createdAt, c.iniciadaEm))) },
   ];
 
+  // resultado depois de iniciada (Jueri): o LTV usa VENDA REAL — sem dado de venda fica null, nunca o consignado
+  const carteiraDe = (sub: typeof lista) => {
+    const ini = sub.filter(c => c.iniciadaEm), lig = ini.filter(c => c.jueri && !c.jueri.erro);
+    const comVenda = lig.filter(c => c.jueri!.faturamento != null);
+    const soma = (f: (j: NonNullable<typeof lig[number]['jueri']>) => number) => lig.reduce((s, c) => s + f(c.jueri!), 0);
+    return {
+      iniciadas: ini.length, ligadasJueri: lig.length, ativasHoje: lig.filter(c => c.jueri!.ativa).length,
+      inadimplentes: lig.filter(c => c.jueri!.inadimplente).length,
+      pedidosMedio: lig.length ? soma(j => j.pedidos) / lig.length : null,
+      primeiraCargaMedia: lig.length ? soma(j => j.primeiraCarga?.valor || 0) / lig.length : null,
+      valorConsignado: soma(j => j.valorConsignado),
+      faturamento: comVenda.length ? comVenda.reduce((s, c) => s + (c.jueri!.faturamento || 0), 0) : null,
+      ltv: comVenda.length ? comVenda.reduce((s, c) => s + (c.jueri!.faturamento || 0), 0) / comVenda.length : null,
+      comDadoDeVenda: comVenda.length,
+    };
+  };
   const agrupar = (chave: (c: typeof lista[number]) => string) => {
     const g = new Map<string, typeof lista>();
     for (const c of lista) { const k = chave(c); g.set(k, [...(g.get(k) || []), c]); }
@@ -117,6 +149,7 @@ operacaoRouter.get('/api/relatorios', async (req, res) => {
       nome, total: sub.length, concluidos: conta('concluido', sub), aprovados: conta('aprovado', sub), reprovados: conta('reprovado', sub),
       iniciadas: conta('iniciada', sub), conversao: sub.length ? conta('iniciada', sub) / sub.length : 0,
       diasAteIniciar: (() => { const h = media(sub.map(c => horas(c.createdAt, c.iniciadaEm))); return h == null ? null : h / 24; })(),
+      carteira: carteiraDe(sub),
     })).sort((a, b) => b.total - a.total);
   };
   const mod = (c: typeof lista[number]) => (c.modalidade === 'presencial' ? 'Presencial (matriz)' : c.modalidade === 'online' ? 'Online (envio)' : 'Ainda não definida');
@@ -152,7 +185,7 @@ operacaoRouter.get('/api/relatorios', async (req, res) => {
 
   res.json({
     periodo: { de: de.toISOString().slice(0, 10), ate: ate.toISOString().slice(0, 10) }, filtros, quiz,
-    funil, decisoes, tempos,
+    funil, decisoes, tempos, carteira: carteiraDe(lista), jueri: { configurado: jueriConfigurado(), ultimaSync },
     porOrigem: agrupar(c => c.origem || 'Sem origem'), porConsultora: agrupar(c => c.consultoraNome || 'Sem consultora'),
     porModalidade: agrupar(mod), porSafra: agrupar(c => c.createdAt.toISOString().slice(0, 7)).sort((a, b) => a.nome.localeCompare(b.nome)),
     motivosReprovacao: motivos('reprovado'), motivosDesistencia: motivos('desistencia'),

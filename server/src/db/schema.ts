@@ -74,6 +74,9 @@ export const cadastros = pgTable('cadastros', {
   cidade: text('cidade'),
   // setor dono da etapa atual (item 7) e descarte LGPD (item 10)
   setor: text('setor'),
+  // ligação com o ERP Jueri (item 2/12): id da revendedora lá + resumo do desempenho (1ª carga, pedidos, inadimplência)
+  jueriId: text('jueri_id'),
+  jueri: jsonb('jueri').$type<ResumoJueri>(),
   descartadoEm: timestamp('descartado_em', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -188,6 +191,16 @@ export const quizRespostas = pgTable('quiz_respostas', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export type ResumoJueri = {
+  atualizadoEm: string; nome?: string; erro?: string;
+  primeiraCarga?: { data: string | null; pecas: number; valor: number | null } | null;
+  pedidos: number; acertos: number; ultimoPedido: string | null;
+  pecasAbertas: number; ativa: boolean;
+  valorConsignado: number; // soma do valor das maletas (NÃO é venda — só referência)
+  faturamento: number | null; // venda real (null = Jueri não entregou dado de venda dessa revendedora)
+  perdidos: { n: number; valor: number }; acertoAtrasadoDias: number; inadimplente: boolean;
+};
+
 export type IaDoc = {
   em: string; modelo: string; erro?: string;
   extraido?: { tipo_documento?: string; nome?: string; cpf?: string; data_nascimento?: string; data_emissao?: string; endereco?: string; cep?: string; cidade?: string; legivel?: boolean; sinais_adulteracao?: string[]; observacoes?: string };
@@ -242,6 +255,8 @@ ALTER TABLE pendencias ADD COLUMN IF NOT EXISTS bloqueia boolean NOT NULL DEFAUL
 ALTER TABLE documentos ADD COLUMN IF NOT EXISTS ia jsonb;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS setor text;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS descartado_em timestamptz;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS jueri_id text;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS jueri jsonb;
 CREATE TABLE IF NOT EXISTS formalizacoes (
   id serial PRIMARY KEY, cadastro_id integer NOT NULL, versao integer NOT NULL, contrato text NOT NULL, promissoria text NOT NULL,
   valor integer NOT NULL, hash text NOT NULL, provedor text NOT NULL, criado_por text, cancelada_em timestamptz, concluida_em timestamptz,

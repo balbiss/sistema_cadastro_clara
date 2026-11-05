@@ -129,9 +129,9 @@ export default function CadastroDetalhe() {
                       </div>
                       {doc?.ia && <IaResumo ia={doc.ia} />}
                     </div>
-                    {doc && <button title="Pedir pra IA ler este documento de novo" disabled={iaRodando === doc.id} style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => rodarIa(doc.id)}>{iaRodando === doc.id ? 'Lendo…' : 'IA'}</button>}
-                    {doc && <a href={arquivoUrl(doc.id)} target="_blank" rel="noreferrer" style={btn('ghost', { minHeight: 30, padding: '0 10px' })}>Ver</a>}
-                    {doc?.status === 'enviado' && <button style={btn('primary', { minHeight: 30, padding: '0 10px' })} onClick={() => setConferir(doc)}>Conferir</button>}
+                    {doc && d.podeConferir && <button title="Pedir pra IA ler este documento de novo" disabled={iaRodando === doc.id} style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => rodarIa(doc.id)}>{iaRodando === doc.id ? 'Lendo…' : 'IA'}</button>}
+                    {doc && !d.limitado && <a href={arquivoUrl(doc.id)} target="_blank" rel="noreferrer" style={btn('ghost', { minHeight: 30, padding: '0 10px' })}>Ver</a>}
+                    {doc?.status === 'enviado' && d.podeConferir && <button style={btn('primary', { minHeight: 30, padding: '0 10px' })} onClick={() => setConferir(doc)}>Conferir</button>}
                   </div>
                 )
               })}
@@ -145,6 +145,7 @@ export default function CadastroDetalhe() {
 
           {(d.formalizacao || ['documentos_ok', 'aguardando_assinatura'].includes(c.status)) && <Formalizacao d={d} onVer={() => setVerDocs(true)} onRefazer={() => setRefazer(true)} />}
           {(c.status === 'inicializacao' || c.status === 'iniciada') && <Inicializacao c={c} d={d} onAcao={setAcaoInic} />}
+          {(c.status === 'inicializacao' || c.status === 'iniciada') && <JueriCard c={c} onAtualizado={carregar} />}
 
           <Card title="Pendências" right={<button style={btn('ghost', { minHeight: 28, padding: '0 10px' })} onClick={() => setNovaPend(true)}><Plus size={14} /> Nova</button>}>
             {!d.pendencias.length ? <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>Nenhuma pendência.</p> : d.pendencias.map((p: D) => (
@@ -414,3 +415,33 @@ function IaResumo({ ia }: { ia: D }) {
   )
 }
 
+
+/** Itens 2/12 do briefing: desempenho da revendedora no Jueri (só leitura). */
+function JueriCard({ c, onAtualizado }: { c: D; onAtualizado: () => void }) {
+  const [rodando, setRodando] = useState(false)
+  const j = c.jueri
+  const atualizar = async () => {
+    setRodando(true)
+    try { const r = await api('POST', `/operacao/jueri/cadastro/${c.id}`); toast(r.jueriId ? 'Dados do Jueri atualizados' : 'Revendedora não encontrada no Jueri pelo CPF', r.jueriId ? 'success' : 'info'); onAtualizado() }
+    catch (e) { toast((e as Error).message, 'error') } finally { setRodando(false) }
+  }
+  const linha = (rot: string, val: React.ReactNode, cor?: string) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 0', borderBottom: '1px dashed var(--line)', fontSize: 13.5 }}>
+      <span style={{ color: 'var(--muted)' }}>{rot}</span><b style={{ color: cor, textAlign: 'right' }}>{val}</b></div>)
+  return (
+    <Card title="Desempenho no Jueri" right={<button style={btn('ghost', { minHeight: 28, padding: '0 10px' })} disabled={rodando} onClick={atualizar}><RefreshCw size={13} /> {rodando ? 'Buscando…' : 'Atualizar'}</button>}>
+      {!c.jueriId ? <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: 0 }}>Ainda não ligada ao Jueri. A ligação é feita sozinha pelo CPF quando a revendedora é iniciada (e a cada 6 horas).</p>
+        : !j ? <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: 0 }}>Ligada (id {c.jueriId}). Clique em Atualizar pra buscar os pedidos.</p> : <>
+        {j.inadimplente && <div style={{ background: '#fdecea', color: '#b3261e', fontWeight: 700, fontSize: 13, padding: '8px 10px', borderRadius: 4, marginBottom: 8 }}>
+          ⚠ Inadimplência: {j.perdidos.n ? `${j.perdidos.n} pedido(s) perdido(s) (${brl(j.perdidos.valor)})` : ''}{j.perdidos.n && j.acertoAtrasadoDias ? ' · ' : ''}{j.acertoAtrasadoDias ? `acerto atrasado há ${j.acertoAtrasadoDias} dias` : ''}</div>}
+        {linha('Revendedora no Jueri', `${j.nome || ''} (id ${c.jueriId})`)}
+        {linha('1ª carga', j.primeiraCarga ? `${dataBR(j.primeiraCarga.data)} · ${j.primeiraCarga.pecas} peças${j.primeiraCarga.valor != null ? ' · ' + brl(j.primeiraCarga.valor) : ''}` : '—')}
+        {linha('Pedidos / acertos', `${j.pedidos} pedido(s) · ${j.acertos} acerto(s)`)}
+        {linha('Último pedido', j.ultimoPedido ? dataBR(j.ultimoPedido) : '—')}
+        {linha('Situação hoje', j.ativa ? `Ativa (${j.pecasAbertas} peças abertas)` : `Sem maleta ativa (${j.pecasAbertas} peças abertas)`, j.ativa ? '#3c8d0d' : '#8a5a00')}
+        {linha('Faturamento (venda real)', j.faturamento != null ? brl(j.faturamento) : 'sem dado de venda no Jueri')}
+        {linha('Valor das maletas (consignado)', brl(j.valorConsignado))}
+        <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '8px 0 0' }}>Atualizado {dataHoraBR(j.atualizadoEm)}. O valor consignado não é venda — o LTV usa só o faturamento real.</p>
+      </>}
+    </Card>)
+}

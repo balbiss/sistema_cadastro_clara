@@ -16,6 +16,8 @@ import { formalizacaoAtual, gerarFormalizacao, linkAssinatura } from '../lib/for
 import { ACOES_INIC, ETAPAS_INIC, ErroInic, executarAcao, modalidadeDe, trocarModalidade, type AcaoInic } from '../lib/inicializacao.js';
 import { DOC_NOME, FINAIS, STATUS, statusNome, type Status } from '../lib/status.js';
 import { soDigitos } from '../lib/util.js';
+import { comFiltro, filtroCadastros, podeVer, restrito } from '../lib/escopo.js';
+import { sincronizarJueri } from '../lib/jueri.js';
 import { conferirComIa, fecharPendenciaIa, iaDisponivel } from '../lib/ia.js';
 
 export const cadastrosRouter = Router();
@@ -30,29 +32,38 @@ async function carregar(id: number) {
   const [c] = await db.select().from(cadastros).where(eq(cadastros.id, id)).limit(1);
   return c;
 }
+/** Carrega só se a pessoa pode ver esse cadastro (consultora: os dela; logística: inicialização). */
+async function carregarVisivel(req: { user?: { id: number; name: string; role: string } }, id: number) {
+  const c = await carregar(id);
+  return c && podeVer(req.user!, c) ? c : undefined;
+}
+const naoAchou = (res: { status: (n: number) => { json: (b: unknown) => unknown } }) => res.status(404).json({ error: 'Cadastro não encontrado' });
 
 // ---------- lista + contadores ----------
-cadastrosRouter.get('/api/cadastros/resumo', async (_req, res) => {
-  const porStatus = await db.select({ status: cadastros.status, n: sql<number>`count(*)::int` }).from(cadastros).groupBy(cadastros.status);
+cadastrosRouter.get('/api/cadastros/resumo', async (req, res) => {
+  const u = req.user!;
+  const porStatus = await db.select({ status: cadastros.status, n: sql<number>`count(*)::int` }).from(cadastros).where(filtroCadastros(u)).groupBy(cadastros.status);
   const [{ vencidos }] = await db.select({ vencidos: sql<number>`count(*)::int` }).from(cadastros)
-    .where(and(lt(cadastros.prazoEtapa, new Date()), inArray(cadastros.status, Object.keys(STATUS).filter(s => !FINAIS.includes(s as Status)))));
-  const [{ abertas }] = await db.select({ abertas: sql<number>`count(*)::int` }).from(pendencias).where(isNull(pendencias.resolvidaEm));
+    .where(comFiltro(u, lt(cadastros.prazoEtapa, new Date()), inArray(cadastros.status, Object.keys(STATUS).filter(s => !FINAIS.includes(s as Status)))));
+  const [{ abertas }] = await db.select({ abertas: sql<number>`count(*)::int` }).from(pendencias).innerJoin(cadastros, eq(cadastros.id, pendencias.cadastroId)).where(comFiltro(u, isNull(pendencias.resolvidaEm)));
   res.json({ status: STATUS, porStatus: Object.fromEntries(porStatus.map(r => [r.status, r.n])), vencidos, pendenciasAbertas: abertas });
 });
 
 // Painel: números do setor, o que precisa de atenção agora e as últimas movimentações.
-cadastrosRouter.get('/api/cadastros/painel', async (_req, res) => {
+cadastrosRouter.get('/api/cadastros/painel', async (req, res) => {
+  const u = req.user!;
   const agora = new Date();
-  const porStatus = Object.fromEntries((await db.select({ status: cadastros.status, n: sql<number>`count(*)::int` }).from(cadastros).groupBy(cadastros.status)).map(r => [r.status, r.n]));
+  const porStatus = Object.fromEntries((await db.select({ status: cadastros.status, n: sql<number>`count(*)::int` }).from(cadastros).where(filtroCadastros(u)).groupBy(cadastros.status)).map(r => [r.status, r.n]));
   const [tempos] = await db.select({
     horas: sql<number>`coalesce(avg(extract(epoch from (${cadastros.decididoEm} - ${cadastros.formConcluidoEm})) / 3600), 0)::float`,
     novos30: sql<number>`count(*) filter (where ${cadastros.createdAt} > now() - interval '30 days')::int`,
-  }).from(cadastros);
+  }).from(cadastros).where(filtroCadastros(u));
   const docsAConferir = await db.selectDistinct({ id: documentos.cadastroId }).from(documentos).where(eq(documentos.status, 'enviado'));
-  const docsIds = new Set(docsAConferir.map(d => d.id));
-  const [{ abertas }] = await db.select({ abertas: sql<number>`count(*)::int` }).from(pendencias).where(isNull(pendencias.resolvidaEm));
+  const visiveis = filtroCadastros(u) ? new Set((await db.select({ id: cadastros.id }).from(cadastros).where(filtroCadastros(u))).map(x => x.id)) : null;
+  const docsIds = new Set(docsAConferir.map(d => d.id).filter(id => !visiveis || visiveis.has(id)));
+  const [{ abertas }] = await db.select({ abertas: sql<number>`count(*)::int` }).from(pendencias).innerJoin(cadastros, eq(cadastros.id, pendencias.cadastroId)).where(comFiltro(u, isNull(pendencias.resolvidaEm)));
 
-  const candidatos = await db.select().from(cadastros).where(sql`${cadastros.status} not in ('reprovado','desistencia','iniciada')`).orderBy(asc(cadastros.prazoEtapa)).limit(300);
+  const candidatos = await db.select().from(cadastros).where(comFiltro(u, sql`${cadastros.status} not in ('reprovado','desistencia','iniciada')`)).orderBy(asc(cadastros.prazoEtapa)).limit(300);
   const atencao = candidatos.map(c => {
     const vencido = !!c.prazoEtapa && c.prazoEtapa < agora;
     const razao = c.status === 'analise_humana' ? 'Aguardando decisão' : docsIds.has(c.id) ? 'Documentos para conferir'
@@ -63,10 +74,10 @@ cadastrosRouter.get('/api/cadastros/painel', async (_req, res) => {
 
   const recentes = await db.select({ id: eventos.id, tipo: eventos.tipo, descricao: eventos.descricao, autor: eventos.autor, createdAt: eventos.createdAt, cadastroId: cadastros.id, nome: cadastros.nome })
     .from(eventos).innerJoin(cadastros, eq(cadastros.id, eventos.cadastroId))
-    .where(inArray(eventos.tipo, ['status_alterado', 'decisao_manual', 'documento_conferido', 'documento_recusado', 'documentos_recebidos', 'formulario_enviado', 'avalista_informado', 'assinatura', 'liberado', 'inicializacao']))
+    .where(comFiltro(u, inArray(eventos.tipo, ['status_alterado', 'decisao_manual', 'documento_conferido', 'documento_recusado', 'documentos_recebidos', 'formulario_enviado', 'avalista_informado', 'assinatura', 'liberado', 'inicializacao'])))
     .orderBy(desc(eventos.id)).limit(6);
 
-  const [{ iniciadas30 }] = await db.select({ iniciadas30: sql<number>`count(*)::int` }).from(cadastros).where(sql`${cadastros.iniciadaEm} > now() - interval '30 days'`);
+  const [{ iniciadas30 }] = await db.select({ iniciadas30: sql<number>`count(*)::int` }).from(cadastros).where(comFiltro(u, sql`${cadastros.iniciadaEm} > now() - interval '30 days'`));
   const total = Object.values(porStatus).reduce((a, b) => a + b, 0);
   const aprovados = ['aprovado', 'aprovado_avalista', 'documentos_ok', 'aguardando_assinatura', 'inicializacao', 'iniciada'].reduce((a, k) => a + (porStatus[k] || 0), 0);
   res.json({
@@ -82,7 +93,7 @@ cadastrosRouter.get('/api/cadastros/painel', async (_req, res) => {
 });
 
 cadastrosRouter.get('/api/cadastros', async (req, res) => {
-  const conds = [];
+  const conds: any[] = [filtroCadastros(req.user!)].filter(Boolean);
   if (req.query.status) conds.push(eq(cadastros.status, String(req.query.status)));
   if (req.query.vencidos === '1') conds.push(lt(cadastros.prazoEtapa, new Date()));
   const q = String(req.query.q || '').trim();
@@ -106,7 +117,8 @@ cadastrosRouter.get('/api/cadastros', async (req, res) => {
 });
 
 // ---------- novo cadastro (manual, quando o lead não veio do CRM) ----------
-cadastrosRouter.post('/api/cadastros', async (req, res) => {
+cadastrosRouter.post('/api/cadastros', exigir(PODE.abrirCadastro, 'Logística não abre cadastro'), async (req, res) => {
+  if (req.user!.role === 'consultora') req.body.consultoraNome = req.user!.name; // consultora abre no nome dela
   const p = z.object({ nome: z.string().min(2), telefone: z.string().optional(), cpf: z.string().optional(), consultoraNome: z.string().optional(), origem: z.string().optional(), campanha: z.string().optional() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Informe pelo menos o nome' });
   const c = await criarCadastro(p.data, quem(req));
@@ -115,8 +127,9 @@ cadastrosRouter.post('/api/cadastros', async (req, res) => {
 
 // ---------- dossiê (item 5) ----------
 cadastrosRouter.get('/api/cadastros/:id', async (req, res) => {
-  const c = await carregar(Number(req.params.id));
-  if (!c) return res.status(404).json({ error: 'Cadastro não encontrado' });
+  const c = await carregarVisivel(req, Number(req.params.id));
+  if (!c) return naoAchou(res);
+  const limitado = restrito(req.user!); // consultora/logística: sem SPC e sem arquivo de documento
   const [consultas, docs, pends, evs, equipe] = await Promise.all([
     db.select().from(consultasCredito).where(eq(consultasCredito.cadastroId, c.id)).orderBy(desc(consultasCredito.id)),
     db.select().from(documentos).where(eq(documentos.cadastroId, c.id)).orderBy(desc(documentos.id)),
@@ -130,11 +143,12 @@ cadastrosRouter.get('/api/cadastros/:id', async (req, res) => {
     formalizacao: form && { ...form, assinaturas: form.assinaturas.map(a => ({ ...a, link: linkAssinatura(a.token) })) },
     liberacao: await requisitosLiberacao(c),
     inicializacao: { etapas: ETAPAS_INIC[modalidadeDe(c)], acoes: Object.entries(ACOES_INIC).filter(([, a]) => a.modalidade === modalidadeDe(c)).map(([k, a]) => ({ chave: k, ...a })) },
-    cadastro: { ...c, statusNome: statusNome(c.status), linkFormulario: linkFormulario(c), linkDossie: linkDossie(c) },
-    consultas, pendencias: pends, eventos: evs, equipe,
-    documentos: docs.map(d => ({ ...d, nome: DOC_NOME[d.tipo] || d.tipo })),
+    cadastro: { ...c, checagens: limitado ? null : c.checagens, statusNome: statusNome(c.status), linkFormulario: linkFormulario(c), linkDossie: linkDossie(c) },
+    consultas: limitado ? [] : consultas, pendencias: pends, equipe,
+    eventos: limitado ? evs.filter(e => !['spc_consultado', 'spc_nao_consultado'].includes(e.tipo)) : evs,
+    documentos: docs.map(d => ({ ...d, nome: DOC_NOME[d.tipo] || d.tipo, ...(limitado ? { arquivo: null, ia: null } : {}) })),
     situacaoDocs: { situacao: sd.situacao, faltam: sd.faltam, itens: sd.itens.map(i => ({ tipo: i.tipo, nome: i.nome, docId: i.doc?.id ?? null, status: i.doc?.status ?? 'faltando' })) },
-    podeDecidir: PODE.decidir(req.user!),
+    podeDecidir: PODE.decidir(req.user!), podeConferir: PODE.conferir(req.user!), limitado,
   });
 });
 
@@ -169,8 +183,10 @@ cadastrosRouter.post('/api/cadastros/:id/reanalisar', exigir(PODE.decidir, 'Só 
 
 // Correção de dados (erro cadastral / contestação): guarda antes e depois.
 cadastrosRouter.patch('/api/cadastros/:id', async (req, res) => {
-  const c = await carregar(Number(req.params.id));
-  if (!c) return res.status(404).end();
+  const c = await carregarVisivel(req, Number(req.params.id));
+  if (!c) return naoAchou(res);
+  // consultora/logística só trocam responsável e modalidade; dados da cliente quem corrige é a equipe de cadastro
+  if (!PODE.conferir(req.user!) && Object.keys(req.body).some(k => !['responsavelId', 'modalidade'].includes(k))) return res.status(403).json({ error: 'Correção de dados é com a análise/administrativo' });
   const campos = ['nome', 'telefone', 'email', 'cpf', 'dataNascimento', 'endereco', 'avalista', 'modalidade', 'responsavelId', 'consultoraNome'] as const;
   const mudou: Record<string, { antes: unknown; depois: unknown }> = {};
   const set: Record<string, unknown> = {};
@@ -197,15 +213,15 @@ cadastrosRouter.patch('/api/cadastros/:id', async (req, res) => {
 cadastrosRouter.post('/api/cadastros/:id/desistencia', async (req, res) => {
   const motivo = String(req.body.motivo || '').trim();
   if (motivo.length < 3) return res.status(400).json({ error: 'Escreva o motivo da desistência' });
-  const c = await carregar(Number(req.params.id));
-  if (!c) return res.status(404).end();
+  const c = await carregarVisivel(req, Number(req.params.id));
+  if (!c) return naoAchou(res);
   if (FINAIS.includes(c.status as Status)) return res.status(409).json({ error: `Cadastro já está em "${statusNome(c.status)}"` });
   await mudarStatus(c, 'desistencia', motivo, quem(req), { inicEtapa: null });
   res.json({ ok: true });
 });
 
 // ---------- documentos ----------
-cadastrosRouter.post('/api/documentos/:id/conferir', async (req, res) => {
+cadastrosRouter.post('/api/documentos/:id/conferir', exigir(PODE.conferir, 'Só análise/administrativo conferem documentos'), async (req, res) => {
   const p = z.object({ status: z.enum(['conferido', 'recusado']), observacao: z.string().optional(), dataEmissao: z.string().optional() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Dados inválidos' });
   const [d] = await db.select().from(documentos).where(eq(documentos.id, Number(req.params.id))).limit(1);
@@ -231,7 +247,7 @@ cadastrosRouter.post('/api/documentos/:id/conferir', async (req, res) => {
   res.json({ ok: true, status });
 });
 
-cadastrosRouter.post('/api/documentos/:id/ia', async (req, res) => {
+cadastrosRouter.post('/api/documentos/:id/ia', exigir(PODE.conferir, 'Só análise/administrativo conferem documentos'), async (req, res) => {
   if (!iaDisponivel()) return res.status(400).json({ error: 'IA não configurada (falta a chave da OpenAI no servidor)' });
   const r = await conferirComIa(Number(req.params.id), quem(req) + ' (pediu conferência da IA)');
   if (!r) return res.status(400).json({ error: 'IA desligada nas configurações ou documento sem arquivo' });
@@ -239,6 +255,7 @@ cadastrosRouter.post('/api/documentos/:id/ia', async (req, res) => {
 });
 
 cadastrosRouter.get('/api/documentos/:id/arquivo', async (req, res) => {
+  if (restrito(req.user!)) return res.status(403).json({ error: 'Seu cargo não abre documentos da cliente' });
   const [d] = await db.select().from(documentos).where(eq(documentos.id, Number(req.params.id))).limit(1);
   if (!d) return res.status(404).end();
   const arq = await ler(d.arquivo.replace(/\\/g, '/'));
@@ -252,13 +269,15 @@ cadastrosRouter.get('/api/documentos/:id/arquivo', async (req, res) => {
 cadastrosRouter.post('/api/cadastros/:id/pendencias', async (req, res) => {
   const p = z.object({ descricao: z.string().min(3), responsavelId: z.number().nullable().optional(), prazo: z.string().nullable().optional() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Descreva a pendência' });
-  const c = await carregar(Number(req.params.id));
-  if (!c) return res.status(404).end();
+  const c = await carregarVisivel(req, Number(req.params.id));
+  if (!c) return naoAchou(res);
   const pend = await abrirPendencia(c.id, p.data.descricao, quem(req), p.data.responsavelId, p.data.prazo);
   res.json(pend);
 });
 
 cadastrosRouter.post('/api/pendencias/:id/resolver', async (req, res) => {
+  const [alvo] = await db.select({ cadastroId: pendencias.cadastroId }).from(pendencias).where(eq(pendencias.id, Number(req.params.id))).limit(1);
+  if (!alvo || !(await carregarVisivel(req, alvo.cadastroId))) return res.status(404).json({ error: 'Pendência não encontrada' });
   const [p] = await db.update(pendencias).set({ resolvidaEm: new Date(), resolvidaPor: quem(req) })
     .where(and(eq(pendencias.id, Number(req.params.id)), isNull(pendencias.resolvidaEm))).returning();
   if (!p) return res.status(404).json({ error: 'Pendência não encontrada ou já resolvida' });
@@ -274,7 +293,7 @@ cadastrosRouter.get('/api/pendencias', async (req, res) => {
     alerta: pendencias.alerta, bloqueia: pendencias.bloqueia, criadaPor: pendencias.criadaPor,
     cadastroId: cadastros.id, codigo: cadastros.codigo, nome: cadastros.nome, status: cadastros.status,
   }).from(pendencias).innerJoin(cadastros, eq(cadastros.id, pendencias.cadastroId))
-    .where(and(isNull(pendencias.resolvidaEm), req.query.minhas === '1' ? eq(pendencias.responsavelId, req.user!.id) : undefined))
+    .where(comFiltro(req.user!, isNull(pendencias.resolvidaEm), req.query.minhas === '1' ? eq(pendencias.responsavelId, req.user!.id) : undefined))
     .orderBy(asc(pendencias.prazo), asc(pendencias.id));
   res.json(rows.map(r => ({ ...r, statusNome: statusNome(r.status) })));
 });
@@ -294,13 +313,14 @@ cadastrosRouter.post('/api/cadastros/:id/formalizacao', exigir(PODE.decidir, 'S�
 cadastrosRouter.post('/api/cadastros/:id/inicializacao', async (req, res) => {
   const acao = String(req.body.acao || '') as AcaoInic;
   if (!(acao in ACOES_INIC)) return res.status(400).json({ error: 'Ação inválida' });
-  const c = await carregar(Number(req.params.id));
-  if (!c) return res.status(404).end();
+  const c = await carregarVisivel(req, Number(req.params.id));
+  if (!c) return naoAchou(res);
   const p = z.object({ data: z.string().optional(), carga: z.string().optional(), valorCarga: z.number().optional(), valorFrete: z.number().optional(), rastreio: z.string().optional(), observacao: z.string().optional() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Dados inválidos' });
   try {
     const novo = await executarAcao(c, acao, p.data, quem(req));
     res.json({ ok: true, status: novo.status, etapa: novo.inicEtapa });
+    if (novo.status === 'iniciada') sincronizarJueri(novo.id).catch(err => console.error('Jueri (iniciada)', novo.id, err)); // item 12: liga ao Jueri na hora
   } catch (e) {
     if (e instanceof ErroInic) return res.status(409).json({ error: e.message });
     throw e;
@@ -308,9 +328,9 @@ cadastrosRouter.post('/api/cadastros/:id/inicializacao', async (req, res) => {
 });
 
 // Fila da inicialização: liberadas (por sub-etapa) + iniciadas nos últimos 30 dias.
-cadastrosRouter.get('/api/inicializacao', async (_req, res) => {
+cadastrosRouter.get('/api/inicializacao', async (req, res) => {
   const rows = await db.select().from(cadastros)
-    .where(or(eq(cadastros.status, 'inicializacao'), and(eq(cadastros.status, 'iniciada'), sql`${cadastros.iniciadaEm} > now() - interval '30 days'`)))
+    .where(comFiltro(req.user!, or(eq(cadastros.status, 'inicializacao'), and(eq(cadastros.status, 'iniciada'), sql`${cadastros.iniciadaEm} > now() - interval '30 days'`))))
     .orderBy(asc(cadastros.prazoEtapa)).limit(500);
   const ids = rows.map(r => r.id);
   const pend = ids.length ? await db.select({ id: pendencias.cadastroId, n: sql<number>`count(*)::int` }).from(pendencias)

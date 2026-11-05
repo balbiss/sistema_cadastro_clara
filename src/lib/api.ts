@@ -2,7 +2,7 @@
 const BASE = ((import.meta as any).env?.VITE_API_URL || '').replace(/\/$/, '') + '/api'
 export const tokenAtual = () => localStorage.getItem('cad_token') || ''
 
-export type Usuario = { id: number; name: string; email: string; role: 'diretoria' | 'analise' | 'administrativo'; active: boolean }
+export type Usuario = { id: number; name: string; email: string; role: 'diretoria' | 'analise' | 'administrativo' | 'logistica' | 'consultora'; active: boolean }
 export const usuarioAtual = (): Usuario | null => { try { return JSON.parse(localStorage.getItem('cad_user') || 'null') } catch { return null } }
 
 export class ErroApi extends Error { constructor(msg: string, public status: number) { super(msg) } }

@@ -10,6 +10,7 @@ import { CENARIOS_PADRAO, MODELOS_PADRAO, PRAZOS_PADRAO, REGRAS_PADRAO, getCenar
 import { criarCadastro } from '../lib/cadastros.js';
 import { enviarPendentesAoCrm, linkFormulario, mudarStatus, resumoParaCrm } from '../lib/eventos.js';
 import { ACOES, STATUS } from '../lib/status.js';
+import { CARGOS } from '../lib/escopo.js';
 
 export const configRouter = Router();
 const soDiretoria = exigir(PODE.configurar, 'Só a diretoria mexe nas configurações');
@@ -65,7 +66,7 @@ configRouter.get('/api/usuarios', requireAuth, async (_req, res) => {
   res.json((await db.select().from(users).orderBy(users.name)).map(semSenha));
 });
 configRouter.post('/api/usuarios', requireAuth, soDiretoria, async (req, res) => {
-  const p = z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(6), role: z.enum(['diretoria', 'analise', 'administrativo']) }).safeParse(req.body);
+  const p = z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(6), role: z.enum(CARGOS) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Preencha nome, e-mail, senha (mín. 6) e cargo' });
   try {
     const [u] = await db.insert(users).values({ name: p.data.name, email: p.data.email.toLowerCase(), passwordHash: bcrypt.hashSync(p.data.password, 10), role: p.data.role }).returning();
@@ -77,7 +78,7 @@ configRouter.post('/api/usuarios', requireAuth, soDiretoria, async (req, res) =>
 configRouter.patch('/api/usuarios/:id', requireAuth, soDiretoria, async (req, res) => {
   const set: Partial<typeof users.$inferInsert> = {};
   if (typeof req.body.active === 'boolean') set.active = req.body.active;
-  if (['diretoria', 'analise', 'administrativo'].includes(req.body.role)) set.role = req.body.role;
+  if ((CARGOS as readonly string[]).includes(req.body.role)) set.role = req.body.role;
   if (req.body.password) set.passwordHash = bcrypt.hashSync(String(req.body.password), 10);
   if (req.user!.id === Number(req.params.id) && set.active === false) return res.status(400).json({ error: 'Você não pode desativar a si mesmo' });
   await db.update(users).set(set).where(eq(users.id, Number(req.params.id)));

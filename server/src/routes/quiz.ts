@@ -113,7 +113,7 @@ quizRouter.post('/api/quiz/config/padrao', requireAuth, soDiretoria, async (_req
   res.json({ quiz: QUIZ_PADRAO });
 });
 
-quizRouter.get('/api/quiz/respostas', requireAuth, async (req, res) => {
+quizRouter.get('/api/quiz/respostas', requireAuth, exigir(PODE.relatorios, 'Sem acesso às respostas do quiz'), async (req, res) => {
   const filtro = String(req.query.filtro || 'todas');
   const cond = filtro === 'aprovadas' ? sql`aprovado = true` : filtro === 'reprovadas' ? sql`aprovado = false` : sql`true`;
   const lista = await db.select().from(quizRespostas).where(cond).orderBy(desc(quizRespostas.id)).limit(500);

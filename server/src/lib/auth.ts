@@ -35,6 +35,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 //  administrativo → confere documentos e pendências (não decide crédito)
 export const PODE = {
   decidir: (u: User) => ['diretoria', 'analise'].includes(u.role),
+  conferir: (u: User) => ['diretoria', 'analise', 'administrativo'].includes(u.role), // documentos e correção de dados
+  relatorios: (u: User) => ['diretoria', 'analise', 'administrativo'].includes(u.role),
+  abrirCadastro: (u: User) => u.role !== 'logistica',
   configurar: (u: User) => u.role === 'diretoria',
 };
 export const exigir = (regra: (u: User) => boolean, msg: string) => (req: Request, res: Response, next: NextFunction) =>
