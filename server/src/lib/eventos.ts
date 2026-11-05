@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import { and, asc, eq, inArray, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { cadastros, eventos } from '../db/schema.js';
-import { getIntegracao, getPrazos } from './settings.js';
+import { cadastros, eventos, users } from '../db/schema.js';
+import { SETORES, getIntegracao, getPrazos, getSetores } from './settings.js';
 import { statusNome, type Status } from './status.js';
 
 type Cadastro = typeof cadastros.$inferSelect;
@@ -36,12 +36,24 @@ export async function mudarStatus(c: Cadastro, status: Status, motivo: string | 
   const prazos = await getPrazos();
   const agora = new Date();
   const horas = prazos[status];
+  // item 7: etapa nova pode ser de outro setor → passa pro responsável padrão desse setor e registra a passagem
+  const setores = await getSetores();
+  const setorNovo = setores.etapas[status] || c.setor || null;
+  const trocouSetor = !!setorNovo && setorNovo !== c.setor;
+  const padrao = trocouSetor ? setores.responsaveis[setorNovo!] : null;
+  const responsavelId = extra.responsavelId !== undefined ? extra.responsavelId : padrao || c.responsavelId;
   const [novo] = await db.update(cadastros).set({
-    ...extra, status, motivo, etapaEntradaEm: agora, updatedAt: agora,
+    ...extra, status, motivo, etapaEntradaEm: agora, updatedAt: agora, setor: setorNovo, responsavelId,
     prazoEtapa: prazo !== undefined ? prazo : horas ? new Date(agora.getTime() + horas * 3600_000) : null,
   }).where(eq(cadastros.id, c.id)).returning();
   await registrarEvento(c.id, 'status_alterado', `${statusNome(c.status)} → ${statusNome(status)}${motivo ? ' — ' + motivo : ''}`, autor,
     { de: c.status, para: status, motivo });
+  if (trocouSetor && c.setor) {
+    const [r] = responsavelId ? await db.select({ name: users.name }).from(users).where(eq(users.id, responsavelId)).limit(1) : [];
+    const prazoTxt = novo.prazoEtapa ? novo.prazoEtapa.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
+    await registrarEvento(c.id, 'passagem', `${SETORES[c.setor] || c.setor} → ${SETORES[setorNovo!] || setorNovo}: entregue por ${autor}, recebido por ${r?.name || 'setor (sem responsável definido)'}${prazoTxt ? ', prazo ' + prazoTxt : ''}`, autor,
+      { de: c.setor, para: setorNovo, entregue_por: autor, recebido_por: r?.name || null, responsavel_id: responsavelId, prazo: novo.prazoEtapa });
+  }
   return novo;
 }
 

@@ -8,6 +8,9 @@ import { configRouter } from './routes/config.js';
 import { quizRouter } from './routes/quiz.js';
 import { iniciarFilaCrm } from './lib/eventos.js';
 import { iniciarStorage } from './lib/storage.js';
+import { iniciarAlertas } from './lib/alertas.js';
+import { iniciarLgpd } from './lib/lgpd.js';
+import { operacaoRouter } from './routes/operacao.js';
 
 process.on('unhandledRejection', err => console.error('Erro não tratado (servidor segue no ar):', err));
 
@@ -18,6 +21,7 @@ app.use(express.json({ limit: '2mb' }));
 
 app.get('/up', (_req, res) => res.json({ ok: true }));
 app.use(quizRouter);
+app.use(operacaoRouter);
 app.use(publicoRouter);
 app.use(configRouter);
 app.use(cadastrosRouter);
@@ -32,4 +36,6 @@ await iniciarStorage();
 app.listen(port, () => {
   console.log('Clara Cadastros (API) em http://localhost:' + port);
   iniciarFilaCrm();
+  iniciarAlertas();
+  iniciarLgpd();
 });

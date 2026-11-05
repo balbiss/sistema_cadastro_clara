@@ -12,6 +12,7 @@ import { formalizacaoAtual } from '../lib/formalizacao.js';
 import { avancar } from '../lib/liberacao.js';
 import { nomeEtapaInic } from '../lib/inicializacao.js';
 import { soDigitos } from '../lib/util.js';
+import { conferirComIa, fecharPendenciaReenvio } from '../lib/ia.js';
 
 // Formulário que a cliente abre pelo link (sem login). O mesmo link serve pra tudo:
 // preencher → completar avalista (se pedirem) → mandar documentos (depois de aprovada).
@@ -123,12 +124,14 @@ publicoRouter.post('/api/publico/:token/documentos', upload.single('arquivo'), a
   if (!DOC_NOME[tipo] || !req.file) return res.status(400).json({ error: 'Arquivo ou tipo de documento inválido' });
   if (!/^(image\/|application\/pdf)/.test(req.file.mimetype)) return res.status(400).json({ error: 'Envie foto ou PDF' });
   const arquivo = await salvarArquivo(c.id, req.file.buffer, req.file.originalname, req.file.mimetype);
-  await db.insert(documentos).values({ cadastroId: c.id, tipo, arquivo, nomeOriginal: req.file.originalname, mime: req.file.mimetype, tamanho: req.file.size });
+  const [novoDoc] = await db.insert(documentos).values({ cadastroId: c.id, tipo, arquivo, nomeOriginal: req.file.originalname, mime: req.file.mimetype, tamanho: req.file.size }).returning();
+  await fecharPendenciaReenvio(c.id, tipo, CLIENTE);
   await registrarEvento(c.id, 'documento_enviado', `Documento enviado: ${DOC_NOME[tipo]}`, CLIENTE, { tipo });
   const docs = await db.select().from(documentos).where(eq(documentos.cadastroId, c.id));
   const sd = situacaoDocs(c, docs);
   if (!sd.faltam.length) await registrarEvento(c.id, 'documentos_recebidos', 'Cliente enviou todos os documentos — aguardando conferência', CLIENTE);
   res.json({ ok: true, faltam: sd.faltam });
+  conferirComIa(novoDoc.id).catch(err => console.error('IA falhou no documento', novoDoc.id, err));
 });
 
 // ---------- assinatura eletrônica (item 9) — SIMULADA até a Clara escolher o serviço ----------

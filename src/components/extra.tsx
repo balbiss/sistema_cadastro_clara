@@ -45,3 +45,9 @@ export function ClaraLogo({ width, color, center }: { width: number | string; co
   const pos = center ? 'center' : 'left center'
   return <span role="img" aria-label="Clara Ferreira" style={{ display: 'block', width, aspectRatio: '1212 / 444', background: color, WebkitMaskImage: 'url(/logos/clara-ferreira-logo-white.png)', maskImage: 'url(/logos/clara-ferreira-logo-white.png)', WebkitMaskSize: 'contain', maskSize: 'contain', WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat', WebkitMaskPosition: pos, maskPosition: pos }} />
 }
+
+/** Pendência de alerta (só cobra) × pendência que trava a liberação. */
+export function TipoPend({ p }: { p: { bloqueia?: boolean | null } }) {
+  const [txt, cor, fundo] = p.bloqueia === false ? ['alerta', '#8a5a00', '#fff1d6'] : ['trava a liberação', '#b3261e', '#fdecea']
+  return <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', color: cor, background: fundo, padding: '1px 6px', borderRadius: 2, marginRight: 6, whiteSpace: 'nowrap' }}>{txt}</span>
+}

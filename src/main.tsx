@@ -18,6 +18,8 @@ import Modelos from './pages/Modelos'
 import Assinar from './pages/Assinar'
 import Quiz from './pages/Quiz'
 import QuizConfig from './pages/QuizConfig'
+import Relatorios from './pages/Relatorios'
+import Operacao from './pages/Operacao'
 
 const Logado = ({ children }: { children: ReactNode }) => (tokenAtual() ? <>{children}</> : <Navigate to="/login" replace />)
 
@@ -38,6 +40,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/pendencias" element={<Pendencias />} />
           <Route path="/modelos" element={<Modelos />} />
           <Route path="/regras" element={<Regras />} />
+          <Route path="/relatorios" element={<Relatorios />} />
+          <Route path="/operacao" element={<Operacao />} />
           <Route path="/integracao" element={<Integracao />} />
           <Route path="/usuarios" element={<Usuarios />} />
         </Route>

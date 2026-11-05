@@ -72,7 +72,7 @@ export async function executarAcao(c: Cadastro, acao: AcaoInic, d: DadosAcao, au
   if (def.modalidade !== modalidadeDe(c)) throw new ErroInic(`"${def.nome}" é da inicialização ${def.modalidade}`);
   if (!(def.de as readonly string[]).includes(c.inicEtapa || '')) throw new ErroInic(`Não dá pra "${def.nome}" na etapa "${nomeEtapaInic(c.inicEtapa)}"`);
   // item 10: nada de inicializar com bloqueio aberto
-  const abertas = await db.select().from(pendencias).where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm)));
+  const abertas = await db.select().from(pendencias).where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm), eq(pendencias.bloqueia, true)));
   if (abertas.length) throw new ErroInic('Resolva a pendência antes: ' + abertas[0].descricao);
 
   const inic: Inicializacao = { ...(c.inicializacao || {}) };

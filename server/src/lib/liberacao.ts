@@ -13,7 +13,7 @@ const APROVADOS = ['aprovado', 'aprovado_avalista', 'documentos_ok', 'aguardando
 export async function requisitosLiberacao(c: Cadastro) {
   const [docs, abertas, form] = await Promise.all([
     db.select().from(documentos).where(eq(documentos.cadastroId, c.id)),
-    db.select().from(pendencias).where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm))),
+    db.select().from(pendencias).where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm), eq(pendencias.bloqueia, true))),
     formalizacaoAtual(c.id),
   ]);
   const sd = situacaoDocs(c, docs);
@@ -22,7 +22,7 @@ export async function requisitosLiberacao(c: Cadastro) {
     { chave: 'credito', nome: 'Crédito aprovado', ok: APROVADOS.includes(c.status) },
     { chave: 'documentos', nome: 'Documentos conferidos', ok: sd.situacao === 'completa', detalhe: sd.situacao === 'completa' ? undefined : sd.faltam.length ? 'Faltam: ' + sd.faltam.join(', ') : 'Aguardando conferência' },
     { chave: 'assinaturas', nome: 'Contrato e promissória assinados', ok: !!form?.assinada, detalhe: !form ? 'Ainda não gerados' : faltaAssinar.length ? 'Falta assinar: ' + faltaAssinar.join(' e ') : undefined },
-    { chave: 'pendencias', nome: 'Nenhuma pendência aberta', ok: abertas.length === 0, detalhe: abertas.length ? abertas.map(p => p.descricao).join('; ') : undefined },
+    { chave: 'pendencias', nome: 'Nenhuma pendência que trava a liberação', ok: abertas.length === 0, detalhe: abertas.length ? abertas.map(p => p.descricao).join('; ') : undefined },
   ];
 }
 

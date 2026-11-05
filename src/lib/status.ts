@@ -17,6 +17,10 @@ export const STATUS: Record<string, { nome: string; cor: string }> = {
 export const ORDEM = Object.keys(STATUS)
 export const ACAO_NOME: Record<string, string> = { pendente_avalista: 'Pedir avalista', analise_humana: 'Mandar pra análise humana', reprovar: 'Reprovar' }
 export const CARGO: Record<string, string> = { diretoria: 'Diretoria', analise: 'Análise cadastral', administrativo: 'Administrativo / documental' }
+export const SETORES: Record<string, string> = {
+  prospeccao: 'Prospecção', analise: 'Análise cadastral', administrativo: 'Administrativo / documental',
+  logistica: 'Operação / Logística', comercial: 'Comercial / Consultoras', gestao: 'Gestão',
+}
 export const FINAIS = ['iniciada', 'reprovado', 'desistencia']
 // Sub-etapas da inicialização (item 6 do briefing)
 export const ETAPA_INIC: Record<string, string> = {

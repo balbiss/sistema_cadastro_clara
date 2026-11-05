@@ -16,6 +16,7 @@ import { formalizacaoAtual, gerarFormalizacao, linkAssinatura } from '../lib/for
 import { ACOES_INIC, ETAPAS_INIC, ErroInic, executarAcao, modalidadeDe, trocarModalidade, type AcaoInic } from '../lib/inicializacao.js';
 import { DOC_NOME, FINAIS, STATUS, statusNome, type Status } from '../lib/status.js';
 import { soDigitos } from '../lib/util.js';
+import { conferirComIa, fecharPendenciaIa, iaDisponivel } from '../lib/ia.js';
 
 export const cadastrosRouter = Router();
 cadastrosRouter.use('/api/cadastros', requireAuth);
@@ -218,6 +219,7 @@ cadastrosRouter.post('/api/documentos/:id/conferir', async (req, res) => {
   }
   if (status === 'recusado' && !observacao) return res.status(400).json({ error: 'Diga o motivo da recusa (a cliente vai ver)' });
   await db.update(documentos).set({ status, observacao: observacao || null, dataEmissao: p.data.dataEmissao || null, conferidoPor: quem(req), conferidoEm: new Date() }).where(eq(documentos.id, d.id));
+  await fecharPendenciaIa(d.id, quem(req)); // a equipe olhou o documento: a dúvida da IA está tratada
   const nome = DOC_NOME[d.tipo] || d.tipo;
   if (status === 'recusado') {
     await registrarEvento(c.id, 'documento_recusado', `${nome} recusado: ${observacao}`, quem(req), { tipo: d.tipo, motivo: observacao });
@@ -227,6 +229,13 @@ cadastrosRouter.post('/api/documentos/:id/conferir', async (req, res) => {
     await avancar(c, quem(req));
   }
   res.json({ ok: true, status });
+});
+
+cadastrosRouter.post('/api/documentos/:id/ia', async (req, res) => {
+  if (!iaDisponivel()) return res.status(400).json({ error: 'IA não configurada (falta a chave da OpenAI no servidor)' });
+  const r = await conferirComIa(Number(req.params.id), quem(req) + ' (pediu conferência da IA)');
+  if (!r) return res.status(400).json({ error: 'IA desligada nas configurações ou documento sem arquivo' });
+  res.json(r);
 });
 
 cadastrosRouter.get('/api/documentos/:id/arquivo', async (req, res) => {
@@ -262,6 +271,7 @@ cadastrosRouter.post('/api/pendencias/:id/resolver', async (req, res) => {
 cadastrosRouter.get('/api/pendencias', async (req, res) => {
   const rows = await db.select({
     id: pendencias.id, descricao: pendencias.descricao, prazo: pendencias.prazo, responsavelId: pendencias.responsavelId, createdAt: pendencias.createdAt,
+    alerta: pendencias.alerta, bloqueia: pendencias.bloqueia, criadaPor: pendencias.criadaPor,
     cadastroId: cadastros.id, codigo: cadastros.codigo, nome: cadastros.nome, status: cadastros.status,
   }).from(pendencias).innerJoin(cadastros, eq(cadastros.id, pendencias.cadastroId))
     .where(and(isNull(pendencias.resolvidaEm), req.query.minhas === '1' ? eq(pendencias.responsavelId, req.user!.id) : undefined))

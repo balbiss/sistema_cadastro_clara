@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, CheckCircle2, Circle, Copy, ExternalLink, FileSignature, FileText, Plus, RefreshCw, XCircle } from 'lucide-react'
 import { api, arquivoUrl } from '../lib/api'
-import { ETAPA_INIC, FINAIS, STATUS } from '../lib/status'
+import { ETAPA_INIC, FINAIS, SETORES, STATUS } from '../lib/status'
 import { brl, cpfFmt, dataBR, dataHoraBR, telFmt } from '../lib/fmt'
 import { Card, Field, Modal, btn, inputStyle, labelStyle } from '../components/ui'
-import { Carregando, Prazo, StatusPill, toast } from '../components/extra'
+import { Carregando, Prazo, StatusPill, TipoPend, toast } from '../components/extra'
 import { AcaoInic, ordenarAcoes } from './Inicializacao'
 
 type D = any
@@ -35,6 +35,12 @@ export default function CadastroDetalhe() {
 
   const reanalisar = async () => { try { await api('POST', `/cadastros/${c.id}/reanalisar`); toast('Análise refeita'); carregar() } catch (er) { toast((er as Error).message, 'error') } }
   const trocarResp = async (v: string) => { await api('PATCH', '/cadastros/' + c.id, { responsavelId: v ? Number(v) : null }); toast('Responsável alterado'); carregar() }
+  const [iaRodando, setIaRodando] = useState<number | null>(null)
+  const rodarIa = async (docId: number) => {
+    setIaRodando(docId)
+    try { await api('POST', `/documentos/${docId}/ia`); toast('IA leu o documento'); carregar() }
+    catch (e) { toast((e as Error).message, 'error') } finally { setIaRodando(null) }
+  }
   const resolver = async (pid: number) => { await api('POST', `/pendencias/${pid}/resolver`); toast('Pendência resolvida'); carregar() }
 
   return (
@@ -49,6 +55,7 @@ export default function CadastroDetalhe() {
             <h1 style={{ margin: '2px 0 8px', fontSize: 24 }}>{c.nome}</h1>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <StatusPill status={c.status} grande />
+              {c.setor && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Setor: <b style={{ color: 'var(--ink)' }}>{SETORES[c.setor] || c.setor}</b></span>}
               {c.status === 'inicializacao' && <span style={{ fontSize: 13, fontWeight: 700 }}>{c.modalidade === 'online' ? 'Online' : 'Presencial'} · {ETAPA_INIC[c.inicEtapa] || c.inicEtapa}</span>}
               {!encerrado && <span style={{ fontSize: 13 }}>Prazo da etapa: <Prazo prazo={c.prazoEtapa} /></span>}
               <span style={{ fontSize: 13, color: 'var(--muted)' }}>na etapa desde {dataHoraBR(c.etapaEntradaEm)}</span>
@@ -120,7 +127,9 @@ export default function CadastroDetalhe() {
                       <div style={{ fontSize: 12, color: i.status === 'recusado' ? '#d93025' : 'var(--muted)' }}>
                         {i.status === 'faltando' ? 'Não enviado' : i.status === 'enviado' ? 'Enviado — conferir' : i.status === 'conferido' ? `Conferido por ${doc?.conferidoPor}${doc?.dataEmissao ? ' · emitido em ' + dataBR(doc.dataEmissao) : ''}` : `Recusado: ${doc?.observacao}`}
                       </div>
+                      {doc?.ia && <IaResumo ia={doc.ia} />}
                     </div>
+                    {doc && <button title="Pedir pra IA ler este documento de novo" disabled={iaRodando === doc.id} style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => rodarIa(doc.id)}>{iaRodando === doc.id ? 'Lendo…' : 'IA'}</button>}
                     {doc && <a href={arquivoUrl(doc.id)} target="_blank" rel="noreferrer" style={btn('ghost', { minHeight: 30, padding: '0 10px' })}>Ver</a>}
                     {doc?.status === 'enviado' && <button style={btn('primary', { minHeight: 30, padding: '0 10px' })} onClick={() => setConferir(doc)}>Conferir</button>}
                   </div>
@@ -141,7 +150,7 @@ export default function CadastroDetalhe() {
             {!d.pendencias.length ? <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>Nenhuma pendência.</p> : d.pendencias.map((p: D) => (
               <div key={p.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', borderBottom: '1px dashed var(--line)', opacity: p.resolvidaEm ? 0.55 : 1 }}>
                 <div style={{ flex: 1, fontSize: 13.5 }}>
-                  <div style={{ textDecoration: p.resolvidaEm ? 'line-through' : undefined }}>{p.descricao}</div>
+                  <div style={{ textDecoration: p.resolvidaEm ? 'line-through' : undefined }}>{!p.resolvidaEm && <TipoPend p={p} />}{p.descricao}</div>
                   <div style={{ fontSize: 12, color: 'var(--muted)' }}>
                     {nomeResp(p.responsavelId) || 'sem responsável'}{p.prazo ? ' · prazo ' + dataBR(p.prazo) : ''}{p.resolvidaEm ? ` · resolvida por ${p.resolvidaPor} em ${dataHoraBR(p.resolvidaEm)}` : ''}
                   </div>
@@ -392,3 +401,16 @@ function Refazer({ c, valor, onClose, onOk }: { c: D; valor?: number; onClose: (
     </Modal>
   )
 }
+
+/** O que a IA achou do documento (item 5). Nunca aprova — só ajuda quem confere. */
+function IaResumo({ ia }: { ia: D }) {
+  if (ia.erro) return <div style={{ fontSize: 12, color: '#8a5a00', marginTop: 3 }}>IA não conseguiu ler — conferir manualmente</div>
+  return (
+    <div style={{ fontSize: 12, marginTop: 4, lineHeight: 1.45 }}>
+      {ia.divergencias?.map((t: string, k: number) => <div key={k} style={{ color: '#c0392b' }}>⚠ IA: {t}</div>)}
+      {ia.ok?.length > 0 && <div style={{ color: '#3c8d0d' }}>✓ IA: {ia.ok.join(' · ')}</div>}
+      {!ia.divergencias?.length && !ia.ok?.length && <div style={{ color: 'var(--muted)' }}>IA leu o documento, sem dados pra comparar</div>}
+    </div>
+  )
+}
+

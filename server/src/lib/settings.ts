@@ -116,3 +116,32 @@ export const getPrazos = () => getSetting<Prazos>('prazos', PRAZOS_PADRAO);
 export const getIntegracao =() => getSetting<Integracao>('integracao', {});
 export const getModelos = () => getSetting<Modelos>('modelos', MODELOS_PADRAO);
 export const getCenarios =() => getSetting<Record<string, CenarioSpc>>('spc_cenarios', CENARIOS_PADRAO);
+
+// ---------- Item 7: setor dono de cada etapa + responsável padrão de cada setor ----------
+export const SETORES: Record<string, string> = {
+  prospeccao: 'Prospecção', analise: 'Análise cadastral', administrativo: 'Administrativo / documental',
+  logistica: 'Operação / Logística', comercial: 'Comercial / Consultoras', gestao: 'Gestão',
+};
+export type Setores = { etapas: Record<string, string>; responsaveis: Record<string, number | null> };
+export const SETORES_PADRAO: Setores = {
+  etapas: {
+    quiz_aprovado: 'prospeccao', formulario_enviado: 'prospeccao',
+    formulario_preenchido: 'analise', pendente_avalista: 'analise', analise_humana: 'analise',
+    aprovado: 'administrativo', aprovado_avalista: 'administrativo', documentos_ok: 'administrativo', aguardando_assinatura: 'administrativo',
+    inicializacao: 'logistica', iniciada: 'comercial', reprovado: 'analise', desistencia: 'prospeccao',
+  },
+  responsaveis: {},
+};
+export const getSetores = async (): Promise<Setores> => {
+  const s = await getSetting<Partial<Setores>>('setores', {});
+  return { etapas: { ...SETORES_PADRAO.etapas, ...(s.etapas || {}) }, responsaveis: { ...(s.responsaveis || {}) } };
+};
+
+// ---------- alertas automáticos e IA ----------
+export type Operacao = { alertas: boolean; ia: boolean };
+export const getOperacao = () => getSetting<Operacao>('operacao', { alertas: true, ia: true });
+
+// ---------- Item 10: retenção e descarte (LGPD). Desligado até a empresa definir a política. ----------
+export type Lgpd = { ativo: boolean; diasReprovado: number; diasDesistencia: number; diasQuizNaoAprovado: number };
+export const LGPD_PADRAO: Lgpd = { ativo: false, diasReprovado: 180, diasDesistencia: 180, diasQuizNaoAprovado: 90 };
+export const getLgpd = () => getSetting<Lgpd>('lgpd', LGPD_PADRAO);

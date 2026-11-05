@@ -47,3 +47,10 @@ export async function ler(chave: string): Promise<Readable | null> {
   if (!caminho.startsWith(PASTA) || !fs.existsSync(caminho)) return null;
   return fs.createReadStream(caminho);
 }
+
+/** Apaga o arquivo (descarte LGPD). Não falha se já não existir. */
+export async function remover(chave: string) {
+  if (!chave || chave.includes('..')) return;
+  if (minio) { try { await minio.removeObject(BUCKET, chave); } catch { /* já não existe */ } return; }
+  try { fs.unlinkSync(path.join(PASTA, chave)); } catch { /* já não existe */ }
+}

@@ -4,9 +4,9 @@ import { Check } from 'lucide-react'
 import { api, usuarioAtual } from '../lib/api'
 import { dataBR, desde } from '../lib/fmt'
 import { btn } from '../components/ui'
-import { Carregando, PageHeader, StatusPill, toast, vazio } from '../components/extra'
+import { Carregando, PageHeader, StatusPill, toast, vazio, TipoPend } from '../components/extra'
 
-type P = { id: number; descricao: string; prazo: string | null; responsavelId: number | null; createdAt: string; cadastroId: number; codigo: string; nome: string; status: string }
+type P = { id: number; bloqueia?: boolean; alerta?: string | null; descricao: string; prazo: string | null; responsavelId: number | null; createdAt: string; cadastroId: number; codigo: string; nome: string; status: string }
 
 // Item 3/7/10 do briefing: nenhuma atividade sem responsável, pendências com prazo e vencidas à vista.
 export default function Pendencias() {
@@ -35,7 +35,7 @@ export default function Pendencias() {
               <tbody>
                 {lista.map(p => (
                   <tr key={p.id} className="linha">
-                    <td style={{ maxWidth: 380 }}>{p.descricao}</td>
+                    <td style={{ maxWidth: 380 }}><TipoPend p={p} />{p.descricao}</td>
                     <td><Link to={'/cadastros/' + p.cadastroId}><b>{p.nome}</b></Link><div style={{ fontSize: 12, color: 'var(--muted)' }}>{p.codigo}</div></td>
                     <td><StatusPill status={p.status} /></td>
                     <td>{equipe.find(u => u.id === p.responsavelId)?.name || <span style={{ color: '#b42318' }}>Sem responsável</span>}</td>

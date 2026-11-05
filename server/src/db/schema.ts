@@ -72,6 +72,9 @@ export const cadastros = pgTable('cadastros', {
   // resumo do quiz de perfil (1ª etapa), quando o cadastro nasceu dele
   quiz: jsonb('quiz').$type<{ respostaId: number; pontos: number; itens: { pergunta: string; resposta: string; pontos: number }[] }>(),
   cidade: text('cidade'),
+  // setor dono da etapa atual (item 7) e descarte LGPD (item 10)
+  setor: text('setor'),
+  descartadoEm: timestamp('descartado_em', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -99,6 +102,8 @@ export const documentos = pgTable('documentos', {
   dataEmissao: date('data_emissao'), // comprovante de residência: até 3 meses (item 5)
   conferidoPor: text('conferido_por'),
   conferidoEm: timestamp('conferido_em', { withTimezone: true }),
+  // leitura da IA (item 5): dados extraídos + divergências. Nunca aprova sozinha.
+  ia: jsonb('ia').$type<IaDoc>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -111,6 +116,10 @@ export const pendencias = pgTable('pendencias', {
   criadaPor: text('criada_por'),
   resolvidaEm: timestamp('resolvida_em', { withTimezone: true }),
   resolvidaPor: text('resolvida_por'),
+  // alerta automático (ex.: 'formulario_parado', 'ia_doc_12') — o sistema abre e fecha sozinho
+  alerta: text('alerta'),
+  // false = só avisa/cobra; true = trava a liberação (pendência manual, divergência da IA)
+  bloqueia: boolean('bloqueia').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -179,6 +188,12 @@ export const quizRespostas = pgTable('quiz_respostas', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export type IaDoc = {
+  em: string; modelo: string; erro?: string;
+  extraido?: { tipo_documento?: string; nome?: string; cpf?: string; data_nascimento?: string; data_emissao?: string; endereco?: string; cep?: string; cidade?: string; legivel?: boolean; sinais_adulteracao?: string[]; observacoes?: string };
+  divergencias: string[]; ok: string[];
+};
+
 export const DDL = `
 CREATE TABLE IF NOT EXISTS users (
   id serial PRIMARY KEY, name text NOT NULL, email text NOT NULL UNIQUE, password_hash text NOT NULL,
@@ -222,6 +237,11 @@ CREATE TABLE IF NOT EXISTS quiz_respostas (
   pontos integer NOT NULL, aprovado boolean NOT NULL, eliminatorias jsonb, origem text, campanha text, cadastro_id integer, ip text,
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS quiz_respostas_tel_idx ON quiz_respostas (telefone);
+ALTER TABLE pendencias ADD COLUMN IF NOT EXISTS alerta text;
+ALTER TABLE pendencias ADD COLUMN IF NOT EXISTS bloqueia boolean NOT NULL DEFAULT true;
+ALTER TABLE documentos ADD COLUMN IF NOT EXISTS ia jsonb;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS setor text;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS descartado_em timestamptz;
 CREATE TABLE IF NOT EXISTS formalizacoes (
   id serial PRIMARY KEY, cadastro_id integer NOT NULL, versao integer NOT NULL, contrato text NOT NULL, promissoria text NOT NULL,
   valor integer NOT NULL, hash text NOT NULL, provedor text NOT NULL, criado_por text, cancelada_em timestamptz, concluida_em timestamptz,

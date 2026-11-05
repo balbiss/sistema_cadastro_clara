@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { cadastros } from '../db/schema.js';
-import { getPrazos } from './settings.js';
+import { getPrazos, getSetores } from './settings.js';
 import { registrarEvento } from './eventos.js';
 import { soDigitos } from './util.js';
 
@@ -17,8 +17,11 @@ export type NovoCadastro = {
 /** Abre o cadastro e o link do formulário (etapa 4 do fluxo: "Formulário enviado"). */
 export async function criarCadastro(d: NovoCadastro, autor: string) {
   const prazos = await getPrazos();
+  const setores = await getSetores();
   const agora = new Date();
+  const setor = setores.etapas[d.doQuiz ? 'quiz_aprovado' : 'formulario_enviado'] || null;
   const [c] = await db.insert(cadastros).values({
+    setor, responsavelId: (setor && setores.responsaveis[setor]) || null,
     codigo: 'tmp-' + crypto.randomUUID(), formToken: crypto.randomBytes(18).toString('base64url'),
     nome: d.nome.trim(), telefone: soDigitos(d.telefone) || null, email: d.email || null, cpf: soDigitos(d.cpf) || null,
     crmLeadId: d.crmLeadId || null, crmContactId: d.crmContactId || null, consultoraNome: d.consultoraNome || null,
