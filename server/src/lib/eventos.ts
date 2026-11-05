@@ -41,7 +41,9 @@ export async function mudarStatus(c: Cadastro, status: Status, motivo: string | 
   const setorNovo = setores.etapas[status] || c.setor || null;
   const trocouSetor = !!setorNovo && setorNovo !== c.setor;
   const padrao = trocouSetor ? setores.responsaveis[setorNovo!] : null;
-  const responsavelId = extra.responsavelId !== undefined ? extra.responsavelId : padrao || c.responsavelId;
+  // quem chama às vezes manda o cadastro inteiro em `extra`: só vale como troca manual se o responsável mudou de fato
+  const trocaManual = extra.responsavelId !== undefined && extra.responsavelId !== c.responsavelId;
+  const responsavelId = trocaManual ? extra.responsavelId! : padrao || c.responsavelId;
   const [novo] = await db.update(cadastros).set({
     ...extra, status, motivo, etapaEntradaEm: agora, updatedAt: agora, setor: setorNovo, responsavelId,
     prazoEtapa: prazo !== undefined ? prazo : horas ? new Date(agora.getTime() + horas * 3600_000) : null,

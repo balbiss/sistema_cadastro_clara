@@ -4,6 +4,8 @@ const API = process.env.E2E_API;
 if (!API) { console.error('Defina E2E_API'); process.exit(2); }
 let ok = 0, falhas = 0;
 const t = (nome, cond, extra = '') => { cond ? ok++ : falhas++; console.log(`${cond ? '✔' : '✘'} ${nome}${cond ? '' : ' — ' + JSON.stringify(extra).slice(0, 400)}`); };
+// CPF válido novo a cada rodada (o simulador do SPC dá "nada consta" pra CPF desconhecido)
+function cpfNovo() { const n = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); for (const k of [9, 10]) { const s = n.reduce((a, d, i) => a + d * (k + 1 - i), 0); n.push((s * 10) % 11 % 10); } return n.join(''); }
 const espera = ms => new Promise(r => setTimeout(r, ms));
 async function req(method, path, { token, body } = {}) {
   const headers = {}; if (token) headers.Authorization = 'Bearer ' + token; if (body) headers['Content-Type'] = 'application/json';
@@ -50,7 +52,7 @@ t('lista de pendências traz tipo (alerta)', lp.some(p => p.alerta === 'a:formul
 // ---- cliente preenche (CPF de teste "nada consta" → aprovado) → alerta fecha + passagem de setor ----
 const token = n.linkFormulario.split('/f/')[1];
 await req('POST', `/api/publico/${token}/iniciar`);
-const f = await req('POST', `/api/publico/${token}/formulario`, { body: { nome: 'Teste Operação', cpf: '52998224725', dataNascimento: '1990-05-10', telefone: '91988887777',
+const f = await req('POST', `/api/publico/${token}/formulario`, { body: { nome: 'Teste Operação', cpf: cpfNovo(), dataNascimento: '1990-05-10', telefone: '91988887777',
   endereco: { cep: '66000-000', rua: 'Rua A', numero: '1', bairro: 'Centro', cidade: 'Belém', uf: 'PA' }, declarouRestricao: false, temAvalista: false, modalidade: 'online', aceiteLgpd: true } });
 t('formulário enviado', f.status === 200, f.json);
 await espera(3000);
@@ -67,7 +69,7 @@ t('alerta do formulário fechou sozinho', d.pendencias.find(p => p.alerta === 'a
 await req('PUT', '/api/config/regras', { token: dir, body: { regras: regras.regras, prazos: { ...regras.prazos, aprovado: 0.0003 }, cenarios: regras.cenarios } });
 const n2 = (await req('POST', '/api/cadastros', { token: dir, body: { nome: 'Teste Silencio' } })).json;
 const tk2 = n2.linkFormulario.split('/f/')[1];
-await req('POST', `/api/publico/${tk2}/formulario`, { body: { nome: 'Teste Silencio', cpf: '52998224725', dataNascimento: '1991-01-01', telefone: '91977776666',
+await req('POST', `/api/publico/${tk2}/formulario`, { body: { nome: 'Teste Silencio', cpf: cpfNovo(), dataNascimento: '1991-01-01', telefone: '91977776666',
   endereco: { cep: '66000-000', rua: 'Rua B', numero: '2', bairro: 'Centro', cidade: 'Belém', uf: 'PA' }, declarouRestricao: false, temAvalista: false, modalidade: 'presencial', aceiteLgpd: true } });
 await espera(3500);
 // (o CPF de teste já tem cadastro → regra de duplicidade pode mandar pra análise humana; aprova manualmente se for o caso)

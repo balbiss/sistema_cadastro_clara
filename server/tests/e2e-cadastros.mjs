@@ -152,6 +152,9 @@ t('...e vira pendência', d.pendencias.some(p => !p.resolvidaEm && p.descricao.s
 t('cliente vê o recusado', (await req('GET', `/api/publico/${a.token}`)).json.documentos.some(x => x.recusado));
 await enviaDoc(a.token, 'comprovante_residencia');
 d = await dossie(a.id);
+t('cliente reenviou → pendência "Reenviar" fecha sozinha', d.pendencias.filter(p => p.descricao.startsWith('Reenviar')).every(p => p.resolvidaEm), d.pendencias);
+// pendência manual (trava) segura a liberação mesmo com tudo conferido
+await req('POST', `/api/cadastros/${a.id}/pendencias`, { token: adm, body: { descricao: 'Confirmar endereço por telefone' } });
 const novoComp = d.documentos.find(x => x.tipo === 'comprovante_residencia' && x.status === 'enviado');
 const hoje = new Date(); hoje.setDate(hoje.getDate() - 10);
 await req('POST', `/api/documentos/${novoComp.id}/conferir`, { token: adm, body: { status: 'conferido', dataEmissao: hoje.toISOString().slice(0, 10) } });
