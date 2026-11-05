@@ -19,6 +19,7 @@ const equipe = (await req('GET', '/api/usuarios', { token: dir })).json;
 const id = email => equipe.find(u => u.email === email)?.id;
 
 // ---- configuração: responsável padrão por setor ----
+{ const c0 = (await req('GET', '/api/operacao/config', { token: dir })).json; await req('PUT', '/api/operacao/config', { token: dir, body: { setores: c0.setores, operacao: c0.operacao, lgpd: { ...c0.lgpd, ativo: false } } }); }
 const cfg = (await req('GET', '/api/operacao/config', { token: dir })).json;
 t('config de operação carrega', cfg.setores?.etapas?.aprovado === 'administrativo' && cfg.lgpd?.ativo === false, cfg);
 t('IA aparece como não configurada (sem chave)', cfg.iaDisponivel === false);

@@ -49,6 +49,13 @@ export async function rodarAlertas() {
   const agora = new Date();
   const setores = await getSetores();
   const ativos = await db.select().from(cadastros).where(and(notInArray(cadastros.status, FINAIS), isNull(cadastros.descartadoEm)));
+  // cadastros de antes da divisão por setor: preenche o setor dono da etapa atual
+  for (const c of ativos.filter(x => !x.setor)) {
+    const setor = setores.etapas[c.status] || null;
+    if (!setor) continue;
+    await db.update(cadastros).set({ setor, responsavelId: c.responsavelId || setores.responsaveis[setor] || null }).where(eq(cadastros.id, c.id));
+    c.setor = setor;
+  }
   const abertas = await db.select().from(pendencias).where(and(isNull(pendencias.resolvidaEm), isNotNull(pendencias.alerta), like(pendencias.alerta, 'a:%')));
   const porCadastro = new Map<number, typeof abertas>();
   for (const p of abertas) porCadastro.set(p.cadastroId, [...(porCadastro.get(p.cadastroId) || []), p]);
