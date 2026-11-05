@@ -6,18 +6,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// E2E_API=https://… roda contra um servidor já no ar (ex.: cópia de teste com Postgres), sem subir um local.
 const PORTA = 3099;
-const API = `http://localhost:${PORTA}`;
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clara-cad-e2e-'));
-const servidor = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
-  env: { ...process.env, PORT: String(PORTA), PGLITE_DIR: path.join(tmp, 'pg'), ARQUIVOS_DIR: path.join(tmp, 'arquivos'), API_URL: API, DATABASE_URL: '' },
-  stdio: ['ignore', 'pipe', 'inherit'],
-});
-process.on('exit', () => { servidor.kill(); fs.rmSync(tmp, { recursive: true, force: true }); });
-await new Promise((ok, erro) => {
-  servidor.stdout.on('data', b => { if (String(b).includes('Clara Cadastros (API)')) ok(); });
-  servidor.on('exit', c => erro(new Error('servidor de teste saiu com código ' + c)));
-});
+const API = process.env.E2E_API || `http://localhost:${PORTA}`;
+if (!process.env.E2E_API) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clara-cad-e2e-'));
+  const servidor = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+    env: { ...process.env, PORT: String(PORTA), PGLITE_DIR: path.join(tmp, 'pg'), ARQUIVOS_DIR: path.join(tmp, 'arquivos'), API_URL: API, DATABASE_URL: '' },
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  process.on('exit', () => { servidor.kill(); fs.rmSync(tmp, { recursive: true, force: true }); });
+  await new Promise((ok, erro) => {
+    servidor.stdout.on('data', b => { if (String(b).includes('Clara Cadastros (API)')) ok(); });
+    servidor.on('exit', c => erro(new Error('servidor de teste saiu com código ' + c)));
+  });
+}
 let ok = 0, falhas = 0;
 const t = (nome, cond, extra = '') => { cond ? ok++ : falhas++; console.log(`${cond ? '✔' : '✘'} ${nome}${cond ? '' : ' — ' + extra}`); };
 const espera = ms => new Promise(r => setTimeout(r, ms));
