@@ -122,7 +122,7 @@ publicoRouter.post('/api/publico/:token/documentos', upload.single('arquivo'), a
   const tipo = String(req.body.tipo || '');
   if (!DOC_NOME[tipo] || !req.file) return res.status(400).json({ error: 'Arquivo ou tipo de documento inválido' });
   if (!/^(image\/|application\/pdf)/.test(req.file.mimetype)) return res.status(400).json({ error: 'Envie foto ou PDF' });
-  const arquivo = salvarArquivo(c.id, req.file.buffer, req.file.originalname);
+  const arquivo = await salvarArquivo(c.id, req.file.buffer, req.file.originalname, req.file.mimetype);
   await db.insert(documentos).values({ cadastroId: c.id, tipo, arquivo, nomeOriginal: req.file.originalname, mime: req.file.mimetype, tamanho: req.file.size });
   await registrarEvento(c.id, 'documento_enviado', `Documento enviado: ${DOC_NOME[tipo]}`, CLIENTE, { tipo });
   const docs = await db.select().from(documentos).where(eq(documentos.cadastroId, c.id));

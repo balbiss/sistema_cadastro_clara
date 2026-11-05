@@ -9,7 +9,8 @@ import { exigir, PODE, requireAuth } from '../lib/auth.js';
 import { criarCadastro } from '../lib/cadastros.js';
 import { analisar, abrirPendencia } from '../lib/analise.js';
 import { linkDossie, linkFormulario, mudarStatus, registrarEvento } from '../lib/eventos.js';
-import { PASTA, comprovanteNoPrazo, situacaoDocs } from '../lib/documentos.js';
+import { comprovanteNoPrazo, situacaoDocs } from '../lib/documentos.js';
+import { ler } from '../lib/storage.js';
 import { avancar, requisitosLiberacao } from '../lib/liberacao.js';
 import { formalizacaoAtual, gerarFormalizacao, linkAssinatura } from '../lib/formalizacao.js';
 import { ACOES_INIC, ETAPAS_INIC, ErroInic, executarAcao, modalidadeDe, trocarModalidade, type AcaoInic } from '../lib/inicializacao.js';
@@ -231,11 +232,11 @@ cadastrosRouter.post('/api/documentos/:id/conferir', async (req, res) => {
 cadastrosRouter.get('/api/documentos/:id/arquivo', async (req, res) => {
   const [d] = await db.select().from(documentos).where(eq(documentos.id, Number(req.params.id))).limit(1);
   if (!d) return res.status(404).end();
-  const caminho = path.join(PASTA, d.arquivo);
-  if (!caminho.startsWith(PASTA) || !fs.existsSync(caminho)) return res.status(404).end();
+  const arq = await ler(d.arquivo.replace(/\\/g, '/'));
+  if (!arq) return res.status(404).end();
   res.setHeader('Content-Type', d.mime || 'application/octet-stream');
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(d.nomeOriginal || 'documento')}"`);
-  fs.createReadStream(caminho).pipe(res);
+  arq.pipe(res);
 });
 
 // ---------- pendências (item 3/7: responsável e prazo) ----------

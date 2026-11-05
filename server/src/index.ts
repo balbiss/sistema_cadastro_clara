@@ -6,11 +6,13 @@ import { publicoRouter } from './routes/publico.js';
 import { cadastrosRouter } from './routes/cadastros.js';
 import { configRouter } from './routes/config.js';
 import { iniciarFilaCrm } from './lib/eventos.js';
+import { iniciarStorage } from './lib/storage.js';
 
 process.on('unhandledRejection', err => console.error('Erro não tratado (servidor segue no ar):', err));
 
 const app = express();
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5185' }));
+app.set('trust proxy', true);
+app.use(cors({ origin: (process.env.CORS_ORIGIN || 'http://localhost:5185').split(',') }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/up', (_req, res) => res.json({ ok: true }));
@@ -24,6 +26,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const port = Number(process.env.PORT) || 3013;
 await initDb();
+await iniciarStorage();
 app.listen(port, () => {
   console.log('Clara Cadastros (API) em http://localhost:' + port);
   iniciarFilaCrm();
