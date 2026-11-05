@@ -119,7 +119,7 @@ quizRouter.get('/api/quiz/respostas', requireAuth, async (req, res) => {
   const lista = await db.select().from(quizRespostas).where(cond).orderBy(desc(quizRespostas.id)).limit(500);
   const desde30 = new Date(Date.now() - 30 * 86400_000);
   const [tot] = await db.select({ total: sql<number>`count(*)::int`, aprovadas: sql<number>`count(*) filter (where aprovado)::int`,
-    ultimos30: sql<number>`count(*) filter (where created_at >= ${desde30})::int`, media: sql<number>`coalesce(avg(pontos),0)::float` }).from(quizRespostas);
+    ultimos30: sql<number>`count(*) filter (where created_at >= now() - interval '30 days')::int`, media: sql<number>`coalesce(avg(pontos),0)::float` }).from(quizRespostas);
   const porOrigem = await db.select({ origem: quizRespostas.origem, total: sql<number>`count(*)::int`, aprovadas: sql<number>`count(*) filter (where aprovado)::int` })
     .from(quizRespostas).where(gte(quizRespostas.createdAt, desde30)).groupBy(quizRespostas.origem);
   res.json({ lista, resumo: tot, porOrigem });
