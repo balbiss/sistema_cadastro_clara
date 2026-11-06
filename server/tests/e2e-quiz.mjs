@@ -100,5 +100,48 @@ lista = (await req('GET', '/api/quizzes', { token: dir })).json;
 for (const q of lista.slice(1)) await req('DELETE', '/api/quizzes/' + q.id, { token: dir });
 t('não deixa excluir o último quiz', (await req('DELETE', '/api/quizzes/' + lista[0].id, { token: dir })).status === 409);
 
+// ---- aparência: cores, logo, capa, fotos nas opções, vídeo ----
+const ap = await req('POST', '/api/quizzes', { token: dir, body: { nome: 'Visual ' + suf, base: 'branco' } });
+const apId = ap.json.id, apSlug = ap.json.slug;
+async function envia(nomeArq, tipo, bytes, token = dir) {
+  const fd = new FormData(); fd.append('arquivo', new Blob([bytes], { type: tipo }), nomeArq);
+  const r = await fetch(API + '/api/quizzes/' + apId + '/imagem', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
+  return { status: r.status, json: await r.json().catch(() => null) };
+}
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+t('administrativo não envia imagem', (await envia('a.png', 'image/png', png, adm)).status === 403);
+t('arquivo que não é imagem/vídeo é recusado', (await envia('a.pdf', 'application/pdf', png)).status === 400);
+const img = await envia('foto.png', 'image/png', png);
+t('envia imagem e recebe o endereço', img.status === 200 && /^\/api\/quiz-midia\/quiz\/\d+\/[a-f0-9]+\.png$/.test(img.json.url) && img.json.video === false, img.json);
+const rImg = await fetch(API + img.json.url);
+t('imagem é servida pública com o tipo certo', rImg.status === 200 && rImg.headers.get('content-type') === 'image/png' && (await rImg.arrayBuffer()).byteLength === png.length);
+const videoBytes = Buffer.alloc(5000, 7);
+const vid = await envia('v.mp4', 'video/mp4', videoBytes);
+t('envia vídeo MP4', vid.status === 200 && vid.json.url.endsWith('.mp4') && vid.json.video === true, vid.json);
+const parte = await fetch(API + vid.json.url, { headers: { Range: 'bytes=100-199' } });
+t('vídeo sai em pedaços (iPhone)', parte.status === 206 && parte.headers.get('content-range') === 'bytes 100-199/5000' && (await parte.arrayBuffer()).byteLength === 100);
+t('mídia inexistente → 404', (await fetch(API + '/api/quiz-midia/quiz/999999/abcdef.png')).status === 404);
+t('caminho fora do quiz não é servido', (await fetch(API + '/api/quiz-midia/../../etc/passwd')).status === 404);
+
+let cfgAp = (await req('GET', '/api/quizzes/' + apId, { token: dir })).json;
+t('quiz novo já vem com aparência padrão (cores da Clara)', cfgAp.quiz.aparencia?.corPrincipal === '#8e2a46' && cfgAp.quiz.aparencia.logo === 'clara');
+const yt = 'https://youtu.be/dQw4w9WgXcQ';
+const quizVisual = { ...cfgAp.quiz, ativo: true, notaCorte: 1,
+  aparencia: { corPrincipal: '#123456', corTitulo: '#222222', corFundo: '#ffffff', corCabecalho: '#eeeeee', logo: 'propria', logoUrl: img.json.url, capaUrl: vid.json.url, layoutOpcoes: 'grade', imagemAprovado: yt, imagemReprovado: img.json.url },
+  perguntas: [{ id: 'cor', texto: 'Qual estilo você mais gosta?', imagem: yt, tipo: 'escolha', opcoes: [
+    { id: 'dourado', texto: 'Dourado', imagem: img.json.url, pontos: 1 }, { id: 'prata', texto: 'Prata', pontos: 0, emoji: '🤍' }] }] };
+let sAp = await req('PUT', '/api/quizzes/' + apId, { token: dir, body: { nome: 'Visual ' + suf, slug: apSlug, quiz: quizVisual } });
+t('salva cores, logo, capa em vídeo, layout em cartões, fotos', sAp.status === 200 && sAp.json.quiz.aparencia.layoutOpcoes === 'grade', sAp.json);
+t('cor inválida é recusada', (await req('PUT', '/api/quizzes/' + apId, { token: dir, body: { nome: 'Visual ' + suf, slug: apSlug, quiz: { ...quizVisual, aparencia: { ...quizVisual.aparencia, corPrincipal: 'vermelho' } } } })).status === 400);
+t('imagem de site de fora é recusada', (await req('PUT', '/api/quizzes/' + apId, { token: dir, body: { nome: 'Visual ' + suf, slug: apSlug, quiz: { ...quizVisual, aparencia: { ...quizVisual.aparencia, capaUrl: 'https://site-estranho.com/x.png' } } } })).status === 400);
+const pubAp = (await req('GET', '/api/quiz-publico/' + apSlug)).json;
+t('quiz público traz a aparência', pubAp.aparencia?.corPrincipal === '#123456' && pubAp.aparencia.logo === 'propria' && pubAp.aparencia.capaUrl === vid.json.url);
+t('quiz público traz foto da pergunta e das opções', pubAp.perguntas[0].imagem === yt && pubAp.perguntas[0].opcoes[0].imagem === img.json.url && pubAp.perguntas[0].opcoes[1].emoji === '🤍');
+t('pontos continuam escondidos', !JSON.stringify(pubAp).includes('"pontos"'));
+const rAp = await req('POST', '/api/quiz-publico/' + apSlug, { body: { nome: 'Visual Teste', telefone: tel(20), cidade: 'Bauru', respostas: { cor: 'dourado' }, aceite: true } });
+t('resultado aprovado traz a imagem/vídeo configurado', rAp.json.aprovado === true && rAp.json.imagem === yt, rAp.json);
+const rAp2 = await req('POST', '/api/quiz-publico/' + apSlug, { body: { nome: 'Visual Teste Dois', telefone: tel(21), cidade: 'Bauru', respostas: { cor: 'prata' }, aceite: true } });
+t('resultado não aprovado traz a imagem dele', rAp2.json.aprovado === false && rAp2.json.imagem === img.json.url, rAp2.json);
+
 console.log(`\n${ok} ok, ${falhas} falha(s)`);
 process.exit(falhas ? 1 : 0);

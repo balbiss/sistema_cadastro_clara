@@ -54,3 +54,16 @@ export async function remover(chave: string) {
   if (minio) { try { await minio.removeObject(BUCKET, chave); } catch { /* já não existe */ } return; }
   try { fs.unlinkSync(path.join(PASTA, chave)); } catch { /* já não existe */ }
 }
+
+/** Tamanho do arquivo (pra vídeo tocar em partes — o iPhone exige). null = não existe. */
+export async function tamanho(chave: string): Promise<number | null> {
+  if (chave.includes('..')) return null;
+  if (minio) { try { return (await minio.statObject(BUCKET, chave)).size; } catch { return null; } }
+  try { return fs.statSync(path.join(PASTA, chave)).size; } catch { return null; }
+}
+/** Pedaço do arquivo [inicio, fim] (inclusive). */
+export async function lerParte(chave: string, inicio: number, fim: number): Promise<Readable | null> {
+  if (chave.includes('..')) return null;
+  if (minio) { try { return await minio.getPartialObject(BUCKET, chave, inicio, fim - inicio + 1); } catch { return null; } }
+  try { return fs.createReadStream(path.join(PASTA, chave), { start: inicio, end: fim }); } catch { return null; }
+}

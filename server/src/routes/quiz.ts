@@ -8,6 +8,9 @@ import { criarCadastro } from '../lib/cadastros.js';
 import { QUIZ_PADRAO, avaliar, completar, linkWhatsapp, quizPorSlug, quizPublico, slugLivre, slugify, type Quiz } from '../lib/quiz.js';
 import { FINAIS } from '../lib/status.js';
 import { soDigitos } from '../lib/util.js';
+import crypto from 'node:crypto';
+import multer from 'multer';
+import { gravar, ler, lerParte, tamanho } from '../lib/storage.js';
 
 // Quizzes de perfil (vários, cada um com link próprio). Público: /api/quiz-publico[/:slug] (sem login).
 // Equipe: /api/quizzes (criar, editar, duplicar, ligar/desligar, excluir — só diretoria) e /api/quiz/respostas.
@@ -16,14 +19,14 @@ const soDiretoria = exigir(PODE.configurar, 'Só a diretoria mexe nos quizzes');
 const APP = () => process.env.APP_URL || 'http://localhost:5185';
 const linkDe = (q: { slug: string; padrao: boolean }) => APP() + (q.padrao ? '/quiz' : '/quiz/' + q.slug);
 
-// trava simples contra robô: 8 envios por IP a cada hora
+// trava simples contra robô: 30 envios por IP a cada hora (Wi-Fi de loja / operadora dividem o mesmo IP)
 const envios = new Map<string, number[]>();
 function muitosEnvios(ip: string) {
   const agora = Date.now();
   const lista = (envios.get(ip) || []).filter(t => agora - t < 3600_000);
   lista.push(agora); envios.set(ip, lista);
   if (envios.size > 5000) envios.clear();
-  return lista.length > 8;
+  return lista.length > 30;
 }
 
 /** Telefone BR com DDI: 11 9xxxx-xxxx → 5511 9xxxx-xxxx */
@@ -78,8 +81,49 @@ quizRouter.post(['/api/quiz-publico', '/api/quiz-publico/:slug'], async (req, re
   }
 
   res.json(r.aprovado
-    ? { aprovado: true, titulo: q.aprovado.titulo, texto: q.aprovado.texto, botao: q.aprovado.botao, whatsapp: linkWhatsapp(q, d.nome) }
-    : { aprovado: false, titulo: q.reprovado.titulo, texto: q.reprovado.texto });
+    ? { aprovado: true, titulo: q.aprovado.titulo, texto: q.aprovado.texto, botao: q.aprovado.botao, whatsapp: linkWhatsapp(q, d.nome), imagem: q.aparencia.imagemAprovado || null }
+    : { aprovado: false, titulo: q.reprovado.titulo, texto: q.reprovado.texto, imagem: q.aparencia.imagemReprovado || null });
+});
+
+// ---------- imagens do quiz (logo, capa, perguntas, opções) ----------
+// Públicas de propósito: aparecem no quiz aberto. Só ficam no "quiz/" do MinIO (nada de documento de cliente).
+const TIPOS_IMG: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/webm': 'webm' };
+const MIME_EXT: Record<string, string> = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', webm: 'video/webm' };
+const uploadImg = multer({ storage: multer.memoryStorage(), limits: { fileSize: 60 * 1024 * 1024 } });
+quizRouter.post('/api/quizzes/:id/imagem', requireAuth, soDiretoria, uploadImg.single('arquivo'), async (req, res) => {
+  const [q] = await db.select({ id: quizzes.id }).from(quizzes).where(eq(quizzes.id, Number(req.params.id))).limit(1);
+  if (!q) return res.status(404).json({ error: 'Quiz não encontrado' });
+  const ext = req.file && TIPOS_IMG[req.file.mimetype];
+  if (!req.file || !ext) return res.status(400).json({ error: 'Envie imagem (JPG, PNG, WEBP, GIF) ou vídeo MP4/WEBM' });
+  const video = req.file.mimetype.startsWith('video/');
+  if (!video && req.file.size > 5 * 1024 * 1024) return res.status(400).json({ error: 'Imagem com mais de 5 MB — diminua antes de enviar' });
+  const chave = `quiz/${q.id}/${crypto.randomBytes(10).toString('hex')}.${ext}`;
+  await gravar(chave, req.file.buffer, req.file.mimetype);
+  res.json({ url: '/api/quiz-midia/' + chave, video });
+});
+quizRouter.get(/^\/api\/quiz-midia\/(quiz\/\d+\/[a-f0-9]+\.(jpg|png|webp|gif|mp4|webm))$/, async (req, res) => {
+  const chave = (req.params as any)[0] as string;
+  const total = await tamanho(chave);
+  if (total == null) return res.status(404).end();
+  res.setHeader('Content-Type', MIME_EXT[chave.split('.').pop()!] || 'application/octet-stream');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader('Accept-Ranges', 'bytes');
+  // vídeo: entrega em pedaços (Range) — sem isso o iPhone não toca
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+  if (m && (m[1] || m[2])) {
+    const inicio = m[1] ? Number(m[1]) : Math.max(0, total - Number(m[2]));
+    const fim = m[1] && m[2] ? Math.min(Number(m[2]), total - 1) : total - 1;
+    if (inicio >= total || inicio > fim) { res.setHeader('Content-Range', `bytes */${total}`); return res.status(416).end(); }
+    const parte = await lerParte(chave, inicio, fim);
+    if (!parte) return res.status(404).end();
+    res.status(206).setHeader('Content-Range', `bytes ${inicio}-${fim}/${total}`);
+    res.setHeader('Content-Length', String(fim - inicio + 1));
+    return parte.pipe(res);
+  }
+  const arq = await ler(chave);
+  if (!arq) return res.status(404).end();
+  res.setHeader('Content-Length', String(total));
+  arq.pipe(res);
 });
 
 // ---------- equipe: lista e CRUD ----------
@@ -121,13 +165,17 @@ quizRouter.post('/api/quizzes', soDiretoria, async (req, res) => {
   res.status(201).json({ id: novo.id, slug: novo.slug, link: linkDe(novo) });
 });
 
-const opcao = z.object({ id: z.string().min(1), texto: z.string().min(1), emoji: z.string().max(8).optional(), pontos: z.coerce.number(), elimina: z.boolean().optional() });
+const imagem = z.string().max(300).regex(/^(\/api\/quiz-midia\/[a-z0-9/._-]+|https:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\/[A-Za-z0-9_?=&/.-]+)$/).optional().or(z.literal('')).transform(v => v || undefined);
+const cor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const opcao = z.object({ id: z.string().min(1), texto: z.string().min(1), emoji: z.string().max(8).optional(), imagem, pontos: z.coerce.number(), elimina: z.boolean().optional() });
+const aparencia = z.object({ corPrincipal: cor, corFundo: cor, corTitulo: cor, corCabecalho: cor, logo: z.enum(['clara', 'propria', 'nenhuma']), logoUrl: imagem,
+  capaUrl: imagem, layoutOpcoes: z.enum(['lista', 'grade']), imagemAprovado: imagem, imagemReprovado: imagem });
 const pergunta = z.object({
-  id: z.string().min(1), texto: z.string().min(2), ajuda: z.string().optional(), tipo: z.enum(['escolha', 'texto']),
+  id: z.string().min(1), texto: z.string().min(2), ajuda: z.string().optional(), imagem, tipo: z.enum(['escolha', 'texto']),
   opcoes: z.array(opcao), mostrarSe: z.object({ perguntaId: z.string(), opcoes: z.array(z.string()) }).nullable().optional(),
 });
 const quizSchema = z.object({
-  ativo: z.boolean(), titulo: z.string(), subtitulo: z.string(), vantagens: z.array(z.string()), botaoComecar: z.string(),
+  ativo: z.boolean(), aparencia, titulo: z.string(), subtitulo: z.string(), vantagens: z.array(z.string()), botaoComecar: z.string(),
   perguntas: z.array(pergunta).min(1), notaCorte: z.coerce.number(), pedirCidade: z.boolean(), textoAnalisando: z.string(),
   aprovado: z.object({ titulo: z.string(), texto: z.string(), botao: z.string(), mensagemWhatsapp: z.string() }),
   reprovado: z.object({ titulo: z.string(), texto: z.string() }), whatsapp: z.string(), textoLgpd: z.string(),
@@ -144,7 +192,7 @@ quizRouter.put('/api/quizzes/:id', soDiretoria, async (req, res) => {
     const [ja] = await db.select({ id: quizzes.id }).from(quizzes).where(eq(quizzes.slug, slugPedido)).limit(1);
     if (ja) return res.status(409).json({ error: `O link "${slugPedido}" já é de outro quiz` });
   }
-  const p = quizSchema.safeParse(req.body.quiz);
+  const p = quizSchema.safeParse(completar(req.body.quiz));
   if (!p.success) return res.status(400).json({ error: 'Confira o quiz: toda pergunta precisa de texto e as de escolha precisam de opções.', detalhes: p.error.flatten() });
   const q = p.data as Quiz;
   const ids = new Set<string>();

@@ -1,5 +1,7 @@
 // Chamadas à API do Clara Cadastros. Em local o Vite repassa /api pra :3013; em produção VITE_API_URL = endereço da API.
 const BASE = ((import.meta as any).env?.VITE_API_URL || '').replace(/\/$/, '') + '/api'
+/** Endereço completo de uma imagem/vídeo servido pela API (ou o próprio link, se já for externo). */
+export const midiaUrl = (src?: string | null) => (!src ? '' : /^https?:/.test(src) ? src : BASE.replace(/\/api$/, '') + src)
 export const tokenAtual = () => localStorage.getItem('cad_token') || ''
 
 export type Usuario = { id: number; name: string; email: string; role: 'diretoria' | 'analise' | 'administrativo' | 'logistica' | 'consultora'; active: boolean }

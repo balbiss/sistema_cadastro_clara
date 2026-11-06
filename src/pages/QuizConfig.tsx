@@ -1,16 +1,19 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowDown, ArrowUp, Copy, ExternalLink, Plus, Trash2, ArrowLeft, CopyPlus, Pencil } from 'lucide-react'
+import { ArrowDown, ArrowUp, Copy, ExternalLink, Plus, Trash2, ArrowLeft, CopyPlus, Pencil, Eye, Image as ImageIcon, Upload, Youtube } from 'lucide-react'
 import Swal from 'sweetalert2'
-import { api, usuarioAtual } from '../lib/api'
+import { api, midiaUrl, usuarioAtual } from '../lib/api'
+import { Midia, idYoutube } from '../components/Midia'
 import { Card, Modal, btn, inputStyle, labelStyle } from '../components/ui'
 import { Carregando, PageHeader, toast, vazio } from '../components/extra'
 
 // Quiz de perfil (1ª etapa, link aberto). Aba Respostas = relatório; aba Perguntas = editor do quiz
 // (perguntas, opções, pontos, eliminatórias, condicionais, nota de corte, textos e WhatsApp).
-type Opcao = { id: string; texto: string; emoji?: string; pontos: number; elimina?: boolean }
-type Pergunta = { id: string; texto: string; ajuda?: string; tipo: 'escolha' | 'texto'; opcoes: Opcao[]; mostrarSe?: { perguntaId: string; opcoes: string[] } | null }
+type Opcao = { id: string; texto: string; emoji?: string; imagem?: string; pontos: number; elimina?: boolean }
+type Pergunta = { id: string; texto: string; ajuda?: string; imagem?: string; tipo: 'escolha' | 'texto'; opcoes: Opcao[]; mostrarSe?: { perguntaId: string; opcoes: string[] } | null }
+type Aparencia = { corPrincipal: string; corFundo: string; corTitulo: string; corCabecalho: string; logo: 'clara' | 'propria' | 'nenhuma'; logoUrl?: string; capaUrl?: string; layoutOpcoes: 'lista' | 'grade'; imagemAprovado?: string; imagemReprovado?: string }
 type Quiz = {
+  aparencia: Aparencia
   ativo: boolean; titulo: string; subtitulo: string; vantagens: string[]; botaoComecar: string; perguntas: Pergunta[]; notaCorte: number
   pedirCidade: boolean; textoAnalisando: string; aprovado: { titulo: string; texto: string; botao: string; mensagemWhatsapp: string }
   reprovado: { titulo: string; texto: string }; whatsapp: string; textoLgpd: string
@@ -190,6 +193,7 @@ function Editor({ id }: { id: number }) {
   const link = meta.link
 
   const set = (patch: Partial<Quiz>) => setQ({ ...q, ...patch })
+  const setAp = (patch: Partial<Aparencia>) => setQ({ ...q, aparencia: { ...q.aparencia, ...patch } })
   const setP = (id: string, patch: Partial<Pergunta>) => set({ perguntas: q.perguntas.map(p => p.id === id ? { ...p, ...patch } : p) })
   const mover = (i: number, d: number) => { const ps = [...q.perguntas]; const [x] = ps.splice(i, 1); ps.splice(i + d, 0, x); set({ perguntas: ps }) }
   const maxPontos = q.perguntas.reduce((a, p) => a + (p.tipo === 'escolha' && !p.mostrarSe ? Math.max(0, ...p.opcoes.map(o => o.pontos)) : 0), 0)
@@ -219,11 +223,34 @@ function Editor({ id }: { id: number }) {
         <code style={{ background: 'var(--card-2)', padding: '4px 8px', borderRadius: 3, fontSize: 13.5, wordBreak: 'break-all' }}>{link}</code>
         <button style={btn('ghost', { minHeight: 30 })} onClick={() => { navigator.clipboard.writeText(link); toast('Link copiado') }}><Copy size={14} /> Copiar</button>
         <a href={link} target="_blank" rel="noreferrer" style={btn('ghost', { minHeight: 30 })}><ExternalLink size={14} /> Abrir</a>
+        <a href={link + '?previa=1'} target="_blank" rel="noreferrer" title="Abre mesmo desligado — salve antes pra ver as mudanças" style={btn('soft', { minHeight: 30 })}><Eye size={14} /> Ver como fica</a>
         <span style={{ fontSize: 12.5, color: 'var(--muted)', flexBasis: '100%' }}>Pra saber de onde veio: acrescente <b>?origem=instagram</b> (ou facebook, tiktok, indicacao…) no fim do link de cada lugar.</span>
       </div>
 
       <div className="grid2" style={{ alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title="Aparência">
+            <div style={{ padding: '10px 16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
+                {([['corPrincipal', 'Botões e barra'], ['corTitulo', 'Títulos'], ['corFundo', 'Fundo da página'], ['corCabecalho', 'Faixa do topo']] as [keyof Aparencia, string][]).map(([k, n]) => (
+                  <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+                    <input type="color" value={String(q.aparencia[k] || '#000000')} onChange={e => setAp({ [k]: e.target.value } as Partial<Aparencia>)} style={{ width: 40, height: 32, border: '1px solid var(--line)', borderRadius: 4, padding: 2, background: '#fff', cursor: 'pointer' }} />
+                    {n}</label>))}
+              </div>
+              <button style={btn('ghost', { minHeight: 28, marginBottom: 12 })} onClick={() => setAp({ corPrincipal: '#8e2a46', corTitulo: '#5a2433', corFundo: '#fbf4f6', corCabecalho: '#f0d0d7' })}>Cores da Clara</button>
+              {campo('Logo no topo', <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 14 }}>
+                {([['clara', 'Logo da Clara'], ['propria', 'Outra imagem'], ['nenhuma', 'Sem logo']] as [Aparencia['logo'], string][]).map(([k, n]) => (
+                  <label key={k} style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="radio" checked={q.aparencia.logo === k} onChange={() => setAp({ logo: k })} /> {n}</label>))}
+              </div>)}
+              {q.aparencia.logo === 'propria' && campo('Imagem do logo', <EnviarMidia quizId={id} valor={q.aparencia.logoUrl} onChange={v => setAp({ logoUrl: v })} />, 'PNG com fundo transparente fica melhor.')}
+              {campo('Capa da abertura (foto ou vídeo)', <EnviarMidia quizId={id} valor={q.aparencia.capaUrl} onChange={v => setAp({ capaUrl: v })} video />, 'Aparece em cima do título na primeira tela. Vídeo: MP4 até 60 MB ou link do YouTube.')}
+              {campo('Jeito de mostrar as opções', <select value={q.aparencia.layoutOpcoes} onChange={e => setAp({ layoutOpcoes: e.target.value as Aparencia['layoutOpcoes'] })} style={{ ...inputStyle, width: 'auto' }}>
+                <option value="lista">Lista (um embaixo do outro)</option><option value="grade">Cartões com foto (2 por linha)</option></select>,
+                'Em "cartões com foto", cada opção mostra a foto dela (ou o emoji, se não tiver foto).')}
+              {campo('Imagem/vídeo da tela de APROVADA', <EnviarMidia quizId={id} valor={q.aparencia.imagemAprovado} onChange={v => setAp({ imagemAprovado: v })} video />)}
+              {campo('Imagem/vídeo da tela de NÃO aprovada', <EnviarMidia quizId={id} valor={q.aparencia.imagemReprovado} onChange={v => setAp({ imagemReprovado: v })} video />)}
+            </div>
+          </Card>
           <Card title="Funcionamento">
             <div style={{ padding: '10px 16px' }}>
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, fontSize: 14 }}>
@@ -285,14 +312,16 @@ function Editor({ id }: { id: number }) {
                     <div style={{ padding: '4px 12px 12px', borderTop: '1px dashed var(--line)' }}>
                       {campo('Pergunta', txt(p.texto, v => setP(p.id, { texto: v }), true))}
                       {campo('Texto de ajuda (opcional)', txt(p.ajuda || '', v => setP(p.id, { ajuda: v || undefined })))}
+                      {campo('Foto ou vídeo da pergunta (opcional)', <EnviarMidia quizId={id} valor={p.imagem} onChange={v => setP(p.id, { imagem: v })} video />)}
                       {campo('Tipo', <select value={p.tipo} onChange={e => setP(p.id, { tipo: e.target.value as Pergunta['tipo'] })} style={{ ...inputStyle, width: 'auto' }}>
                         <option value="escolha">Escolher uma opção (com pontos)</option><option value="texto">Resposta escrita</option></select>)}
                       {p.tipo === 'escolha' && <>
-                        <label style={labelStyle}>Opções — emoji (opcional), texto, pontos, elimina</label>
+                        <label style={labelStyle}>Opções — foto (opcional), emoji (opcional), texto, pontos, elimina</label>
                         {p.opcoes.map((o, k) => {
                           const setO = (patch: Partial<Opcao>) => setP(p.id, { opcoes: p.opcoes.map(x => x.id === o.id ? { ...x, ...patch } : x) })
                           return (
                             <div key={o.id} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                              <EnviarMidia quizId={id} valor={o.imagem} onChange={v => setO({ imagem: v })} compacto />
                               <input value={o.emoji || ''} placeholder="🙂" onChange={e => setO({ emoji: e.target.value || undefined })} style={{ ...inputStyle, width: 46, textAlign: 'center' }} />
                               <input value={o.texto} onChange={e => setO({ texto: e.target.value })} style={{ ...inputStyle, flex: 1 }} />
                               <input type="number" title="Pontos" value={o.pontos} onChange={e => setO({ pontos: Number(e.target.value) })} style={{ ...inputStyle, width: 64 }} />
@@ -329,4 +358,45 @@ function Editor({ id }: { id: number }) {
     </div>
   )
 }
+/** Envia foto/vídeo pro servidor (ou aceita link do YouTube) e mostra a prévia. */
+function EnviarMidia({ quizId, valor, onChange, video, compacto }: { quizId: number; valor?: string; onChange: (v: string | undefined) => void; video?: boolean; compacto?: boolean }) {
+  const [enviando, setEnviando] = useState(false)
+  const [yt, setYt] = useState(false)
+  const [link, setLink] = useState('')
+  const ref = useRef<HTMLInputElement>(null)
+  const enviar = async (arq?: File) => {
+    if (!arq) return
+    if (!video && arq.type.startsWith('video/')) return toast('Aqui só vai foto', 'error')
+    if (arq.size > (arq.type.startsWith('video/') ? 60 : 5) * 1024 * 1024) return toast(arq.type.startsWith('video/') ? 'Vídeo com mais de 60 MB' : 'Imagem com mais de 5 MB', 'error')
+    setEnviando(true)
+    try { const f = new FormData(); f.append('arquivo', arq); const r = await api('POST', `/quizzes/${quizId}/imagem`, f); onChange(r.url); toast('Enviado — clique em Salvar quiz') }
+    catch (e) { toast((e as Error).message, 'error') } finally { setEnviando(false); if (ref.current) ref.current.value = '' }
+  }
+  const aceita = video ? 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp,image/gif'
+  const arquivo = <input ref={ref} type="file" accept={aceita} style={{ display: 'none' }} onChange={e => enviar(e.target.files?.[0])} />
+  if (compacto) return (
+    <span style={{ position: 'relative', flex: 'none' }}>
+      {arquivo}
+      <button title={valor ? 'Trocar foto (clique) — a foto aparece no cartão da opção' : 'Pôr foto na opção'} onClick={() => ref.current?.click()} disabled={enviando}
+        style={{ ...iconBtn, width: 38, height: 34, padding: 0, overflow: 'hidden' }}>
+        {enviando ? '…' : valor ? <img src={midiaUrl(valor)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <ImageIcon size={15} />}
+      </button>
+      {valor && <button title="Tirar foto" onClick={() => onChange(undefined)} style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: 8, border: 'none', background: '#c0392b', color: '#fff', fontSize: 10, lineHeight: '16px', padding: 0 }}>×</button>}
+    </span>)
+  return (
+    <div>
+      {arquivo}
+      {valor && <div style={{ maxWidth: 260, marginBottom: 8 }}><Midia src={valor} style={{ borderRadius: 6 }} /></div>}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button style={btn('ghost', { minHeight: 30 })} disabled={enviando} onClick={() => ref.current?.click()}><Upload size={14} /> {enviando ? 'Enviando…' : valor ? 'Trocar' : video ? 'Enviar foto ou vídeo' : 'Enviar imagem'}</button>
+        {video && <button style={btn('ghost', { minHeight: 30 })} onClick={() => setYt(!yt)}><Youtube size={14} /> Link do YouTube</button>}
+        {valor && <button style={btn('ghost', { minHeight: 30, color: '#c0392b' })} onClick={() => onChange(undefined)}>Tirar</button>}
+      </div>
+      {yt && <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <input value={link} onChange={e => setLink(e.target.value)} placeholder="https://www.youtube.com/watch?v=… ou youtu.be/…" style={inputStyle} />
+        <button style={btn('primary', { minHeight: 34 })} onClick={() => { if (!idYoutube(link)) return toast('Link do YouTube inválido', 'error'); onChange(link.trim()); setYt(false); setLink('') }}>Usar</button>
+      </div>}
+    </div>)
+}
+
 const iconBtn: CSSProperties = { width: 28, height: 28, border: '1px solid var(--line)', borderRadius: 4, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink)', flex: 'none' }

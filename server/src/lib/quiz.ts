@@ -7,14 +7,24 @@ import { getSetting } from './settings.js';
 // cada opção vale pontos; passou da nota de corte = perfil aprovado → vira cadastro e o CRM é avisado.
 // Tudo editável pela diretoria na tela "Quiz de perfil". A pontuação nunca vai pro navegador.
 
-export type Opcao = { id: string; texto: string; emoji?: string; pontos: number; elimina?: boolean };
+export type Opcao = { id: string; texto: string; emoji?: string; imagem?: string; pontos: number; elimina?: boolean };
 export type Pergunta = {
-  id: string; texto: string; ajuda?: string; tipo: 'escolha' | 'texto'; opcoes: Opcao[];
+  id: string; texto: string; ajuda?: string; imagem?: string; tipo: 'escolha' | 'texto'; opcoes: Opcao[];
   /** só aparece se a resposta da pergunta `perguntaId` for uma das `opcoes` */
   mostrarSe?: { perguntaId: string; opcoes: string[] } | null;
 };
+/** Visual do quiz (cada quiz tem o seu). Imagens = endereço devolvido pelo envio de imagem. */
+export type Aparencia = {
+  corPrincipal: string; corFundo: string; corTitulo: string; corCabecalho: string;
+  logo: 'clara' | 'propria' | 'nenhuma'; logoUrl?: string;
+  capaUrl?: string; layoutOpcoes: 'lista' | 'grade';
+  imagemAprovado?: string; imagemReprovado?: string;
+};
+export const APARENCIA_PADRAO: Aparencia = { corPrincipal: '#8e2a46', corFundo: '#fbf4f6', corTitulo: '#5a2433', corCabecalho: '#f0d0d7', logo: 'clara', layoutOpcoes: 'lista' };
+
 export type Quiz = {
   ativo: boolean;
+  aparencia: Aparencia;
   titulo: string; subtitulo: string; vantagens: string[]; botaoComecar: string;
   perguntas: Pergunta[];
   notaCorte: number;
@@ -32,6 +42,7 @@ const esc = (id: string, texto: string, opcoes: Opcao[], extra: Partial<Pergunta
 // Ponto de partida (a Bel ajusta textos, pontos e nota de corte na tela).
 export const QUIZ_PADRAO: Quiz = {
   ativo: true,
+  aparencia: APARENCIA_PADRAO,
   titulo: 'Descubra se você tem o perfil para ser uma revendedora Clara Ferreira!',
   subtitulo: 'Responda o teste rápido (2 minutos) e veja na hora se você se qualifica.',
   vantagens: ['Sem investimento inicial', 'Maleta de semijoias consignada', 'Ganhe por cada peça vendida'],
@@ -94,6 +105,7 @@ export const QUIZ_PADRAO: Quiz = {
 
 /** Completa um quiz salvo com os campos do modelo (quiz antigo sem campo novo não quebra). */
 export const completar = (q: Partial<Quiz> | null | undefined): Quiz => ({ ...QUIZ_PADRAO, ...(q || {}),
+  aparencia: { ...APARENCIA_PADRAO, ...(q?.aparencia || {}) },
   aprovado: { ...QUIZ_PADRAO.aprovado, ...(q?.aprovado || {}) }, reprovado: { ...QUIZ_PADRAO.reprovado, ...(q?.reprovado || {}) } });
 
 export const slugify = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'quiz';
@@ -127,10 +139,10 @@ export async function quizPorSlug(slug?: string) {
 /** O que o navegador recebe: sem pontos e sem saber o que elimina. */
 export function quizPublico(q: Quiz) {
   return {
-    ativo: q.ativo, titulo: q.titulo, subtitulo: q.subtitulo, vantagens: q.vantagens, botaoComecar: q.botaoComecar,
+    ativo: q.ativo, aparencia: q.aparencia, titulo: q.titulo, subtitulo: q.subtitulo, vantagens: q.vantagens, botaoComecar: q.botaoComecar,
     pedirCidade: q.pedirCidade, textoAnalisando: q.textoAnalisando, textoLgpd: q.textoLgpd,
-    perguntas: q.perguntas.map(p => ({ id: p.id, texto: p.texto, ajuda: p.ajuda, tipo: p.tipo, mostrarSe: p.mostrarSe || null,
-      opcoes: p.opcoes.map(o => ({ id: o.id, texto: o.texto, emoji: o.emoji })) })),
+    perguntas: q.perguntas.map(p => ({ id: p.id, texto: p.texto, ajuda: p.ajuda, imagem: p.imagem, tipo: p.tipo, mostrarSe: p.mostrarSe || null,
+      opcoes: p.opcoes.map(o => ({ id: o.id, texto: o.texto, emoji: o.emoji, imagem: o.imagem })) })),
   };
 }
 
