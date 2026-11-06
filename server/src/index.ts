@@ -6,6 +6,7 @@ import { publicoRouter } from './routes/publico.js';
 import { cadastrosRouter } from './routes/cadastros.js';
 import { configRouter } from './routes/config.js';
 import { quizRouter } from './routes/quiz.js';
+import { garantirQuizzes } from './lib/quiz.js';
 import { iniciarFilaCrm } from './lib/eventos.js';
 import { iniciarStorage } from './lib/storage.js';
 import { iniciarAlertas } from './lib/alertas.js';
@@ -35,6 +36,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const port = Number(process.env.PORT) || 3013;
 await initDb();
+await garantirQuizzes(); // quiz único antigo vira o 1º da lista
 await iniciarStorage();
 app.listen(port, () => {
   console.log('Clara Cadastros (API) em http://localhost:' + port);

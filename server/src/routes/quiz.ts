@@ -1,18 +1,20 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, desc, gte, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { cadastros, quizRespostas } from '../db/schema.js';
+import { cadastros, quizRespostas, quizzes } from '../db/schema.js';
 import { exigir, PODE, requireAuth } from '../lib/auth.js';
 import { criarCadastro } from '../lib/cadastros.js';
-import { QUIZ_PADRAO, avaliar, getQuiz, linkWhatsapp, quizPublico, salvarQuiz, type Quiz } from '../lib/quiz.js';
+import { QUIZ_PADRAO, avaliar, completar, linkWhatsapp, quizPorSlug, quizPublico, slugLivre, slugify, type Quiz } from '../lib/quiz.js';
 import { FINAIS } from '../lib/status.js';
 import { soDigitos } from '../lib/util.js';
 
-// Quiz de perfil (1ª etapa, link aberto). Rotas em /api/quiz-publico (sem login) e /api/quiz (equipe).
+// Quizzes de perfil (vários, cada um com link próprio). Público: /api/quiz-publico[/:slug] (sem login).
+// Equipe: /api/quizzes (criar, editar, duplicar, ligar/desligar, excluir — só diretoria) e /api/quiz/respostas.
 export const quizRouter = Router();
-const soDiretoria = exigir(PODE.configurar, 'Só a diretoria mexe no quiz');
-const linkPublico = () => (process.env.APP_URL || 'http://localhost:5185') + '/quiz';
+const soDiretoria = exigir(PODE.configurar, 'Só a diretoria mexe nos quizzes');
+const APP = () => process.env.APP_URL || 'http://localhost:5185';
+const linkDe = (q: { slug: string; padrao: boolean }) => APP() + (q.padrao ? '/quiz' : '/quiz/' + q.slug);
 
 // trava simples contra robô: 8 envios por IP a cada hora
 const envios = new Map<string, number[]>();
@@ -28,9 +30,11 @@ function muitosEnvios(ip: string) {
 const telefoneBr = (t: string) => { const d = soDigitos(t); return d.length === 10 || d.length === 11 ? '55' + d : d; };
 const variantes = (tel: string) => [tel, tel.startsWith('55') ? tel.slice(2) : '55' + tel];
 
-quizRouter.get('/api/quiz-publico', async (_req, res) => {
-  const q = await getQuiz();
-  res.json(quizPublico(q));
+// ---------- público ----------
+quizRouter.get(['/api/quiz-publico', '/api/quiz-publico/:slug'], async (req, res) => {
+  const q = await quizPorSlug(req.params.slug);
+  if (!q) return res.status(404).json({ error: 'Esse teste não existe (confira o link).' });
+  res.json({ ...quizPublico(q.config), slug: q.slug });
 });
 
 const envio = z.object({
@@ -39,8 +43,10 @@ const envio = z.object({
   origem: z.string().max(80).optional(), campanha: z.string().max(160).optional(),
 });
 
-quizRouter.post('/api/quiz-publico', async (req, res) => {
-  const q = await getQuiz();
+quizRouter.post(['/api/quiz-publico', '/api/quiz-publico/:slug'], async (req, res) => {
+  const qz = await quizPorSlug(req.params.slug);
+  if (!qz) return res.status(404).json({ error: 'Esse teste não existe (confira o link).' });
+  const q = qz.config;
   if (!q.ativo) return res.status(403).json({ error: 'O teste está fechado no momento.' });
   const ip = String(req.ip || '');
   if (muitosEnvios(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente de novo mais tarde.' });
@@ -53,10 +59,11 @@ quizRouter.post('/api/quiz-publico', async (req, res) => {
 
   const r = avaliar(q, d.respostas);
   if (r.faltando.length) return res.status(400).json({ error: 'Faltou responder: ' + r.faltando[0] });
+  const origem = d.origem || qz.nome; // sem ?origem= no link, a origem é o próprio quiz
 
   const [salva] = await db.insert(quizRespostas).values({
     nome: d.nome, telefone, cidade: d.cidade || null, respostas: d.respostas, itens: r.itens, pontos: r.pontos, aprovado: r.aprovado,
-    eliminatorias: r.eliminatorias, origem: d.origem || 'Quiz', campanha: d.campanha || null, ip,
+    eliminatorias: r.eliminatorias, origem, campanha: d.campanha || null, ip, quizId: qz.id, quizNome: qz.nome,
   }).returning();
 
   if (r.aprovado) {
@@ -64,10 +71,10 @@ quizRouter.post('/api/quiz-publico', async (req, res) => {
     const [aberto] = await db.select().from(cadastros)
       .where(and(inArray(cadastros.telefone, variantes(telefone)), notInArray(cadastros.status, FINAIS))).limit(1);
     const cad = aberto || await criarCadastro({
-      nome: d.nome, telefone, cidade: d.cidade, origem: d.origem || 'Quiz', campanha: d.campanha, doQuiz: true,
-      quiz: { respostaId: salva.id, pontos: r.pontos, itens: r.itens },
+      nome: d.nome, telefone, cidade: d.cidade, origem, campanha: d.campanha, doQuiz: true,
+      quiz: { respostaId: salva.id, pontos: r.pontos, quizId: qz.id, quizNome: qz.nome, itens: r.itens },
     }, 'cliente (quiz)');
-    await db.update(quizRespostas).set({ cadastroId: cad.id }).where(sql`id = ${salva.id}`);
+    await db.update(quizRespostas).set({ cadastroId: cad.id }).where(eq(quizRespostas.id, salva.id));
   }
 
   res.json(r.aprovado
@@ -75,9 +82,43 @@ quizRouter.post('/api/quiz-publico', async (req, res) => {
     : { aprovado: false, titulo: q.reprovado.titulo, texto: q.reprovado.texto });
 });
 
-// ---------- equipe ----------
-quizRouter.get('/api/quiz/config', requireAuth, soDiretoria, async (_req, res) => {
-  res.json({ quiz: await getQuiz(), link: linkPublico() });
+// ---------- equipe: lista e CRUD ----------
+quizRouter.use('/api/quizzes', requireAuth);
+
+quizRouter.get('/api/quizzes', exigir(PODE.relatorios, 'Sem acesso aos quizzes'), async (_req, res) => {
+  const lista = await db.select().from(quizzes).orderBy(desc(quizzes.padrao), asc(quizzes.id));
+  const cont = await db.select({ quizId: quizRespostas.quizId, total: sql<number>`count(*)::int`, aprovadas: sql<number>`count(*) filter (where aprovado)::int`,
+    ultima: sql<string>`max(created_at)` }).from(quizRespostas).groupBy(quizRespostas.quizId);
+  const m = new Map(cont.map(c => [c.quizId, c]));
+  res.json(lista.map(q => {
+    const cfg = completar(q.config as Partial<Quiz>);
+    return { id: q.id, nome: q.nome, slug: q.slug, padrao: q.padrao, ativo: cfg.ativo, perguntas: cfg.perguntas.length, notaCorte: cfg.notaCorte,
+      whatsapp: !!cfg.whatsapp, link: linkDe(q), respostas: m.get(q.id)?.total || 0, aprovadas: m.get(q.id)?.aprovadas || 0,
+      ultimaResposta: m.get(q.id)?.ultima || null, updatedAt: q.updatedAt };
+  }));
+});
+
+quizRouter.get('/api/quizzes/:id', soDiretoria, async (req, res) => {
+  const [q] = await db.select().from(quizzes).where(eq(quizzes.id, Number(req.params.id))).limit(1);
+  if (!q) return res.status(404).json({ error: 'Quiz não encontrado' });
+  res.json({ id: q.id, nome: q.nome, slug: q.slug, padrao: q.padrao, link: linkDe(q), quiz: completar(q.config as Partial<Quiz>) });
+});
+
+// novo: em branco (1 pergunta de exemplo), a partir do modelo da Clara, ou cópia de outro quiz
+quizRouter.post('/api/quizzes', soDiretoria, async (req, res) => {
+  const p = z.object({ nome: z.string().trim().min(2).max(80), base: z.enum(['modelo', 'branco']).default('modelo'), copiarDe: z.number().optional() }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: 'Dê um nome ao quiz' });
+  let config: Quiz;
+  if (p.data.copiarDe) {
+    const [o] = await db.select().from(quizzes).where(eq(quizzes.id, p.data.copiarDe)).limit(1);
+    if (!o) return res.status(404).json({ error: 'Quiz de origem não encontrado' });
+    config = completar(o.config as Partial<Quiz>);
+  } else if (p.data.base === 'branco') {
+    config = { ...QUIZ_PADRAO, perguntas: [{ id: 'p1', texto: 'Escreva aqui a primeira pergunta', tipo: 'escolha', opcoes: [{ id: 'o1', texto: 'Opção 1', pontos: 1 }, { id: 'o2', texto: 'Opção 2', pontos: 0 }] }], notaCorte: 1 };
+  } else config = QUIZ_PADRAO;
+  config = { ...config, ativo: false }; // nasce desligado: a Bel revisa e liga
+  const [novo] = await db.insert(quizzes).values({ nome: p.data.nome, slug: await slugLivre(p.data.nome), config }).returning();
+  res.status(201).json({ id: novo.id, slug: novo.slug, link: linkDe(novo) });
 });
 
 const opcao = z.object({ id: z.string().min(1), texto: z.string().min(1), emoji: z.string().max(8).optional(), pontos: z.coerce.number(), elimina: z.boolean().optional() });
@@ -92,8 +133,18 @@ const quizSchema = z.object({
   reprovado: z.object({ titulo: z.string(), texto: z.string() }), whatsapp: z.string(), textoLgpd: z.string(),
 });
 
-quizRouter.put('/api/quiz/config', requireAuth, soDiretoria, async (req, res) => {
-  const p = quizSchema.safeParse(req.body);
+quizRouter.put('/api/quizzes/:id', soDiretoria, async (req, res) => {
+  const id = Number(req.params.id);
+  const [atual] = await db.select().from(quizzes).where(eq(quizzes.id, id)).limit(1);
+  if (!atual) return res.status(404).json({ error: 'Quiz não encontrado' });
+  const nome = String(req.body.nome || atual.nome).trim();
+  if (nome.length < 2) return res.status(400).json({ error: 'Dê um nome ao quiz' });
+  const slugPedido = req.body.slug !== undefined ? slugify(String(req.body.slug)) : atual.slug;
+  if (slugPedido !== atual.slug) {
+    const [ja] = await db.select({ id: quizzes.id }).from(quizzes).where(eq(quizzes.slug, slugPedido)).limit(1);
+    if (ja) return res.status(409).json({ error: `O link "${slugPedido}" já é de outro quiz` });
+  }
+  const p = quizSchema.safeParse(req.body.quiz);
   if (!p.success) return res.status(400).json({ error: 'Confira o quiz: toda pergunta precisa de texto e as de escolha precisam de opções.', detalhes: p.error.flatten() });
   const q = p.data as Quiz;
   const ids = new Set<string>();
@@ -104,23 +155,56 @@ quizRouter.put('/api/quiz/config', requireAuth, soDiretoria, async (req, res) =>
     if (x.mostrarSe && !q.perguntas.some(o => o.id === x.mostrarSe!.perguntaId)) x.mostrarSe = null;
   }
   q.whatsapp = soDigitos(q.whatsapp);
-  await salvarQuiz(q);
-  res.json({ quiz: q });
+  const [salvo] = await db.update(quizzes).set({ nome, slug: slugPedido, config: q, updatedAt: new Date() }).where(eq(quizzes.id, id)).returning();
+  res.json({ id, nome, slug: salvo.slug, padrao: salvo.padrao, link: linkDe(salvo), quiz: q });
 });
 
-quizRouter.post('/api/quiz/config/padrao', requireAuth, soDiretoria, async (_req, res) => {
-  await salvarQuiz(QUIZ_PADRAO);
-  res.json({ quiz: QUIZ_PADRAO });
+// liga/desliga rápido pela lista
+quizRouter.post('/api/quizzes/:id/ativo', soDiretoria, async (req, res) => {
+  const [q] = await db.select().from(quizzes).where(eq(quizzes.id, Number(req.params.id))).limit(1);
+  if (!q) return res.status(404).json({ error: 'Quiz não encontrado' });
+  const cfg = { ...completar(q.config as Partial<Quiz>), ativo: !!req.body.ativo };
+  await db.update(quizzes).set({ config: cfg, updatedAt: new Date() }).where(eq(quizzes.id, q.id));
+  res.json({ ok: true, ativo: cfg.ativo });
 });
 
+// o padrão é o que abre em /quiz (link curto)
+quizRouter.post('/api/quizzes/:id/padrao', soDiretoria, async (req, res) => {
+  const [q] = await db.select().from(quizzes).where(eq(quizzes.id, Number(req.params.id))).limit(1);
+  if (!q) return res.status(404).json({ error: 'Quiz não encontrado' });
+  await db.update(quizzes).set({ padrao: false }).where(eq(quizzes.padrao, true));
+  await db.update(quizzes).set({ padrao: true }).where(eq(quizzes.id, q.id));
+  res.json({ ok: true });
+});
+
+// excluir: as respostas e cadastros que vieram dele CONTINUAM (com o nome do quiz guardado)
+quizRouter.delete('/api/quizzes/:id', soDiretoria, async (req, res) => {
+  const [q] = await db.select().from(quizzes).where(eq(quizzes.id, Number(req.params.id))).limit(1);
+  if (!q) return res.status(404).json({ error: 'Quiz não encontrado' });
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(quizzes);
+  if (n <= 1) return res.status(409).json({ error: 'Precisa existir pelo menos um quiz — desligue em vez de excluir' });
+  await db.delete(quizzes).where(eq(quizzes.id, q.id));
+  if (q.padrao) { // passa o link curto pro mais antigo que sobrou
+    const [outro] = await db.select({ id: quizzes.id }).from(quizzes).orderBy(asc(quizzes.id)).limit(1);
+    if (outro) await db.update(quizzes).set({ padrao: true }).where(eq(quizzes.id, outro.id));
+  }
+  res.json({ ok: true });
+});
+
+// ---------- respostas (relatório) ----------
 quizRouter.get('/api/quiz/respostas', requireAuth, exigir(PODE.relatorios, 'Sem acesso às respostas do quiz'), async (req, res) => {
   const filtro = String(req.query.filtro || 'todas');
-  const cond = filtro === 'aprovadas' ? sql`aprovado = true` : filtro === 'reprovadas' ? sql`aprovado = false` : sql`true`;
-  const lista = await db.select().from(quizRespostas).where(cond).orderBy(desc(quizRespostas.id)).limit(500);
-  const desde30 = new Date(Date.now() - 30 * 86400_000);
+  const conds: SQL[] = [];
+  if (filtro === 'aprovadas') conds.push(eq(quizRespostas.aprovado, true));
+  if (filtro === 'reprovadas') conds.push(eq(quizRespostas.aprovado, false));
+  if (req.query.quiz) conds.push(eq(quizRespostas.quizId, Number(req.query.quiz)));
+  const onde = conds.length ? and(...conds) : undefined;
+  const lista = await db.select().from(quizRespostas).where(onde).orderBy(desc(quizRespostas.id)).limit(500);
   const [tot] = await db.select({ total: sql<number>`count(*)::int`, aprovadas: sql<number>`count(*) filter (where aprovado)::int`,
-    ultimos30: sql<number>`count(*) filter (where created_at >= now() - interval '30 days')::int`, media: sql<number>`coalesce(avg(pontos),0)::float` }).from(quizRespostas);
+    ultimos30: sql<number>`count(*) filter (where created_at >= now() - interval '30 days')::int`, media: sql<number>`coalesce(avg(pontos),0)::float` })
+    .from(quizRespostas).where(req.query.quiz ? eq(quizRespostas.quizId, Number(req.query.quiz)) : undefined);
+  const desde30 = new Date(Date.now() - 30 * 86400_000);
   const porOrigem = await db.select({ origem: quizRespostas.origem, total: sql<number>`count(*)::int`, aprovadas: sql<number>`count(*) filter (where aprovado)::int` })
-    .from(quizRespostas).where(gte(quizRespostas.createdAt, desde30)).groupBy(quizRespostas.origem);
+    .from(quizRespostas).where(and(gte(quizRespostas.createdAt, desde30), req.query.quiz ? eq(quizRespostas.quizId, Number(req.query.quiz)) : undefined)).groupBy(quizRespostas.origem);
   res.json({ lista, resumo: tot, porOrigem });
 });

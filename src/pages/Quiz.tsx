@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, MessageCircle, Sparkles } from 'lucide-react'
 import { api } from '../lib/api'
 import { ClaraLogo } from '../components/extra'
@@ -32,7 +33,9 @@ export default function Quiz() {
   const [erro2, setErro2] = useState('')
   const params = useMemo(() => new URLSearchParams(window.location.search), [])
 
-  useEffect(() => { api<QuizPub>('GET', '/quiz-publico').then(setQ).catch(e => setErro(e.message)) }, [])
+  const { slug } = useParams()
+  const caminho = '/quiz-publico' + (slug ? '/' + encodeURIComponent(slug) : '')
+  useEffect(() => { api<QuizPub>('GET', caminho).then(setQ).catch(e => setErro(e.message)) }, [caminho])
   useEffect(() => { window.scrollTo(0, 0) }, [tela, atual])
 
   if (erro) return <Moldura><Caixa><h2 style={{ color: VINHO }}>Ops!</h2><p>{erro}</p></Caixa></Moldura>
@@ -72,7 +75,7 @@ export default function Quiz() {
     setErro2(''); setEnviando(true); setTela('analisando')
     const inicio = Date.now()
     try {
-      const r = await api<Resultado>('POST', '/quiz-publico', {
+      const r = await api<Resultado>('POST', caminho, {
         nome: contato.nome, telefone: contato.telefone, cidade: contato.cidade || undefined, respostas: resp, aceite: true,
         origem: params.get('origem') || params.get('utm_source') || undefined, campanha: params.get('utm_campaign') || params.get('campanha') || undefined,
       })

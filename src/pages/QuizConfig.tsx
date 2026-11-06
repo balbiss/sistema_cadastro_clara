@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowDown, ArrowUp, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ArrowDown, ArrowUp, Copy, ExternalLink, Plus, Trash2, ArrowLeft, CopyPlus, Pencil } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { api, usuarioAtual } from '../lib/api'
 import { Card, Modal, btn, inputStyle, labelStyle } from '../components/ui'
@@ -21,17 +21,88 @@ const dataHora = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '
 const telFmt = (t: string) => t.replace(/^55/, '').replace(/^(\d{2})(\d{4,5})(\d{4})$/, '($1) $2-$3')
 
 export default function QuizConfig() {
-  const diretoria = usuarioAtual()?.role === 'diretoria'
-  const [aba, setAba] = useState<'respostas' | 'perguntas'>('respostas')
+  const { id } = useParams()
+  const [aba, setAba] = useState<'quizzes' | 'respostas'>('quizzes')
+  if (id) return <Editor id={Number(id)} />
   return (
     <div>
-      <PageHeader title="Quiz de perfil" subtitle="1ª etapa: link aberto pra anúncio e Instagram. Quem passa vira cadastro e o CRM é avisado." />
+      <PageHeader title="Quizzes de perfil" subtitle="1ª etapa: links abertos pra anúncio e Instagram. Quem passa vira cadastro e o CRM é avisado." />
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--line)', marginBottom: 16 }}>
-        {([['respostas', 'Respostas'], ...(diretoria ? [['perguntas', 'Perguntas e telas']] : [])] as [typeof aba, string][]).map(([k, n]) => (
+        {([['quizzes', 'Quizzes'], ['respostas', 'Respostas']] as [typeof aba, string][]).map(([k, n]) => (
           <button key={k} onClick={() => setAba(k)} style={{ background: 'none', border: 'none', padding: '10px 14px', fontSize: 14, fontWeight: 700,
             color: aba === k ? 'var(--vinho)' : 'var(--muted)', borderBottom: `3px solid ${aba === k ? 'var(--terra)' : 'transparent'}`, marginBottom: -1 }}>{n}</button>))}
       </div>
-      {aba === 'respostas' ? <Respostas /> : <Editor />}
+      {aba === 'quizzes' ? <Lista /> : <Respostas />}
+    </div>
+  )
+}
+
+// ---------------- Lista de quizzes (criar, editar, duplicar, ligar/desligar, excluir) ----------------
+function Lista() {
+  const nav = useNavigate()
+  const diretoria = usuarioAtual()?.role === 'diretoria'
+  const [lista, setLista] = useState<any[] | null>(null)
+  const [novo, setNovo] = useState<{ nome: string; base: string } | null>(null)
+  const carregar = () => api('GET', '/quizzes').then(setLista)
+  useEffect(() => { carregar() }, [])
+  if (!lista) return <Carregando />
+  const criar = async () => {
+    if (!novo || novo.nome.trim().length < 2) return toast('Dê um nome ao quiz', 'error')
+    try { const r = await api('POST', '/quizzes', { nome: novo.nome, base: novo.base }); setNovo(null); toast('Quiz criado (desligado) — revise e ligue'); nav('/quiz-perfil/' + r.id) }
+    catch (e) { toast((e as Error).message, 'error') }
+  }
+  const duplicar = async (q: any) => {
+    const r = await api('POST', '/quizzes', { nome: q.nome + ' (cópia)', copiarDe: q.id }); toast('Cópia criada (desligada)'); nav('/quiz-perfil/' + r.id)
+  }
+  const ligar = async (q: any) => { await api('POST', `/quizzes/${q.id}/ativo`, { ativo: !q.ativo }); toast(q.ativo ? 'Quiz desligado — o link mostra "teste fechado"' : 'Quiz ligado — já recebe respostas'); carregar() }
+  const principal = async (q: any) => { await api('POST', `/quizzes/${q.id}/padrao`); toast('Agora é o quiz do link curto /quiz'); carregar() }
+  const excluir = async (q: any) => {
+    const ok = await Swal.fire({ title: `Excluir "${q.nome}"?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Excluir', cancelButtonText: 'Cancelar', confirmButtonColor: '#d93025',
+      html: `O link deixa de funcionar. As <b>${q.respostas}</b> resposta(s) e os cadastros que vieram dele continuam guardados.` })
+    if (!ok.isConfirmed) return
+    try { await api('DELETE', '/quizzes/' + q.id); toast('Quiz excluído'); carregar() } catch (e) { toast((e as Error).message, 'error') }
+  }
+  return (
+    <div>
+      {diretoria && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button style={btn('primary')} onClick={() => setNovo({ nome: '', base: 'modelo' })}><Plus size={15} /> Novo quiz</button></div>}
+      {!lista.length ? <div style={vazio}>Nenhum quiz ainda.</div> : (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {lista.map(q => (
+            <div key={q.id} style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '14px 16px', display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <b style={{ fontSize: 16, color: 'var(--vinho)' }}>{q.nome}</b>
+                  <span style={{ ...pill, background: q.ativo ? '#ccff66' : '#d5d8db' }}>{q.ativo ? 'Ligado' : 'Desligado'}</span>
+                  {q.padrao && <span style={{ ...pill, background: '#fbe9ee', color: 'var(--vinho)' }}>Link principal</span>}
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4, wordBreak: 'break-all' }}>{q.link}</div>
+                <div style={{ fontSize: 13, marginTop: 6 }}>{q.perguntas} perguntas · corte {q.notaCorte} pts · <b>{q.respostas}</b> respostas · <b>{q.aprovadas}</b> aprovadas{q.ultimaResposta ? ' · última ' + dataHora(q.ultimaResposta) : ''}{!q.whatsapp && <span style={{ color: '#8a5a00' }}> · sem WhatsApp</span>}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button style={btn('ghost', { minHeight: 30 })} onClick={() => { navigator.clipboard.writeText(q.link); toast('Link copiado') }}><Copy size={14} /> Link</button>
+                <a href={q.link} target="_blank" rel="noreferrer" style={btn('ghost', { minHeight: 30 })}><ExternalLink size={14} /> Abrir</a>
+                {diretoria && <>
+                  <button style={btn('primary', { minHeight: 30 })} onClick={() => nav('/quiz-perfil/' + q.id)}><Pencil size={14} /> Editar</button>
+                  <button style={btn('ghost', { minHeight: 30 })} onClick={() => ligar(q)}>{q.ativo ? 'Desligar' : 'Ligar'}</button>
+                  <button style={btn('ghost', { minHeight: 30 })} onClick={() => duplicar(q)}><CopyPlus size={14} /> Duplicar</button>
+                  {!q.padrao && <button style={btn('ghost', { minHeight: 30 })} title="Passa a abrir no link curto /quiz" onClick={() => principal(q)}>Tornar principal</button>}
+                  <button style={btn('ghost', { minHeight: 30, color: '#c0392b' })} onClick={() => excluir(q)}><Trash2 size={14} /></button>
+                </>}
+              </div>
+            </div>))}
+        </div>)}
+      {novo && (
+        <Modal title="Novo quiz" subtitle="Ele nasce desligado: você revisa as perguntas e liga quando estiver pronto." onClose={() => setNovo(null)}
+          footer={<><button style={btn('ghost')} onClick={() => setNovo(null)}>Cancelar</button><button style={btn('primary')} onClick={criar}>Criar</button></>}>
+          <label style={labelStyle}>Nome (vira o link)</label>
+          <input autoFocus value={novo.nome} onChange={e => setNovo({ ...novo, nome: e.target.value })} placeholder="Ex.: Quiz Instagram, Campanha Black Friday" style={inputStyle} />
+          <label style={{ ...labelStyle, marginTop: 12 }}>Começar com</label>
+          {[['modelo', 'As perguntas do modelo da Clara (15 perguntas, depois você ajusta)'], ['branco', 'Em branco (1 pergunta de exemplo)']].map(([k, n]) => (
+            <label key={k} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, padding: '4px 0' }}>
+              <input type="radio" checked={novo.base === k} onChange={() => setNovo({ ...novo, base: k })} /> {n}</label>))}
+          <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '10px 0 0' }}>Pra copiar um quiz que já existe, use "Duplicar" na lista.</p>
+        </Modal>)}
     </div>
   )
 }
@@ -40,9 +111,12 @@ export default function QuizConfig() {
 function Respostas() {
   const nav = useNavigate()
   const [filtro, setFiltro] = useState('todas')
+  const [quizSel, setQuizSel] = useState('')
+  const [quizzes, setQuizzes] = useState<any[]>([])
   const [d, setD] = useState<any>(null)
   const [ver, setVer] = useState<any>(null)
-  useEffect(() => { setD(null); api('GET', '/quiz/respostas?filtro=' + filtro).then(setD) }, [filtro])
+  useEffect(() => { api('GET', '/quizzes').then(setQuizzes) }, [])
+  useEffect(() => { setD(null); api('GET', '/quiz/respostas?filtro=' + filtro + (quizSel ? '&quiz=' + quizSel : '')).then(setD) }, [filtro, quizSel])
   if (!d) return <Carregando />
   const r = d.resumo
   const quadro = (titulo: string, valor: ReactNode, sub?: string) => (
@@ -65,19 +139,21 @@ function Respostas() {
             {d.porOrigem.map((o: any) => <span key={o.origem || '-'}><b>{o.origem || 'Sem origem'}</b>: {o.total} responderam · {o.aprovadas} aprovadas</span>)}
           </div>
         </Card>)}
-      <Card title="Quem respondeu" right={
+      <Card title="Quem respondeu" right={<div style={{ display: 'flex', gap: 6 }}>
+        <select value={quizSel} onChange={e => setQuizSel(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+          <option value="">Todos os quizzes</option>{quizzes.map(q => <option key={q.id} value={q.id}>{q.nome}</option>)}</select>
         <select value={filtro} onChange={e => setFiltro(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
           <option value="todas">Todas</option><option value="aprovadas">Só aprovadas</option><option value="reprovadas">Só não aprovadas</option>
-        </select>}>
+        </select></div>}>
         {!d.lista.length ? <div style={vazio}>Ninguém respondeu ainda. Divulgue o link do quiz (aba "Perguntas e telas").</div> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead><tr style={{ textAlign: 'left', color: 'var(--muted)', fontSize: 12, textTransform: 'uppercase' }}>
-                {['Quando', 'Nome', 'WhatsApp', 'Cidade', 'Pontos', 'Resultado', 'Origem', ''].map(h => <th key={h} style={{ padding: '8px 12px', borderBottom: '1px solid var(--line)' }}>{h}</th>)}
+                {['Quando', 'Quiz', 'Nome', 'WhatsApp', 'Cidade', 'Pontos', 'Resultado', 'Origem', ''].map(h => <th key={h} style={{ padding: '8px 12px', borderBottom: '1px solid var(--line)' }}>{h}</th>)}
               </tr></thead>
               <tbody>{d.lista.map((x: any) => (
                 <tr key={x.id} className="linha" style={{ cursor: 'pointer' }} onClick={() => setVer(x)}>
-                  <td style={td}>{dataHora(x.createdAt)}</td><td style={td}><b>{x.nome}</b></td><td style={td}>{telFmt(x.telefone)}</td>
+                  <td style={td}>{dataHora(x.createdAt)}</td><td style={td}>{x.quizNome || '—'}</td><td style={td}><b>{x.nome}</b></td><td style={td}>{telFmt(x.telefone)}</td>
                   <td style={td}>{x.cidade || '—'}</td><td style={td}>{x.pontos}</td>
                   <td style={td}><span style={{ ...pill, background: x.aprovado ? '#ccff66' : '#ffc8c8' }}>{x.aprovado ? 'Aprovada' : 'Não passou'}</span></td>
                   <td style={td}>{x.origem || '—'}</td>
@@ -103,13 +179,15 @@ const td: CSSProperties = { padding: '9px 12px', borderBottom: '1px solid var(--
 const pill: CSSProperties = { padding: '2px 8px', borderRadius: 2, fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', color: '#313942' }
 
 // ---------------- Editor ----------------
-function Editor() {
+function Editor({ id }: { id: number }) {
+  const nav = useNavigate()
   const [q, setQ] = useState<Quiz | null>(null)
-  const [link, setLink] = useState('')
+  const [meta, setMeta] = useState({ nome: '', slug: '', link: '', padrao: false })
   const [salvando, setSalvando] = useState(false)
   const [aberta, setAberta] = useState<string | null>(null)
-  useEffect(() => { api('GET', '/quiz/config').then(r => { setQ(r.quiz); setLink(r.link) }) }, [])
+  useEffect(() => { api('GET', '/quizzes/' + id).then(r => { setQ(r.quiz); setMeta({ nome: r.nome, slug: r.slug, link: r.link, padrao: r.padrao }) }).catch(e => { toast(e.message, 'error'); nav('/quiz-perfil') }) }, [id])
   if (!q) return <Carregando />
+  const link = meta.link
 
   const set = (patch: Partial<Quiz>) => setQ({ ...q, ...patch })
   const setP = (id: string, patch: Partial<Pergunta>) => set({ perguntas: q.perguntas.map(p => p.id === id ? { ...p, ...patch } : p) })
@@ -117,13 +195,8 @@ function Editor() {
   const maxPontos = q.perguntas.reduce((a, p) => a + (p.tipo === 'escolha' && !p.mostrarSe ? Math.max(0, ...p.opcoes.map(o => o.pontos)) : 0), 0)
   const salvar = async () => {
     setSalvando(true)
-    try { const r = await api('PUT', '/quiz/config', q); setQ(r.quiz); toast('Quiz salvo — já vale pra quem abrir o link') }
+    try { const r = await api('PUT', '/quizzes/' + id, { nome: meta.nome, slug: meta.slug, quiz: q }); setQ(r.quiz); setMeta({ nome: r.nome, slug: r.slug, link: r.link, padrao: r.padrao }); toast('Quiz salvo — já vale pra quem abrir o link') }
     catch (e) { toast((e as Error).message, 'error') } finally { setSalvando(false) }
-  }
-  const restaurar = async () => {
-    const ok = await Swal.fire({ title: 'Voltar ao quiz padrão?', text: 'Perguntas e textos voltam ao modelo inicial. As respostas já recebidas continuam guardadas.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Voltar ao padrão', cancelButtonText: 'Cancelar', confirmButtonColor: '#c8506a' })
-    if (!ok.isConfirmed) return
-    const r = await api('POST', '/quiz/config/padrao'); setQ(r.quiz); toast('Quiz padrão restaurado')
   }
   const campo = (titulo: string, el: ReactNode, ajuda?: string) => (
     <div style={{ marginBottom: 12 }}><label style={labelStyle}>{titulo}</label>{el}{ajuda && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{ajuda}</div>}</div>)
@@ -133,6 +206,14 @@ function Editor() {
 
   return (
     <div>
+      <button onClick={() => nav('/quiz-perfil')} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 13.5, padding: 0, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}><ArrowLeft size={15} /> Voltar aos quizzes</button>
+      <PageHeader title={meta.nome || 'Quiz'} subtitle="Perguntas, pontos, condições e textos deste quiz." />
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ flex: '1 1 240px' }}><label style={labelStyle}>Nome do quiz</label><input value={meta.nome} onChange={e => setMeta({ ...meta, nome: e.target.value })} style={inputStyle} /></div>
+        <div style={{ flex: '1 1 240px' }}><label style={labelStyle}>Link (endereço){meta.padrao ? ' — é o principal, também abre em /quiz' : ''}</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ fontSize: 13, color: 'var(--muted)', whiteSpace: 'nowrap' }}>/quiz/</span>
+            <input value={meta.slug} onChange={e => setMeta({ ...meta, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') })} style={inputStyle} /></div></div>
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16, background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '12px 14px' }}>
         <span style={{ fontSize: 14 }}>Link do quiz:</span>
         <code style={{ background: 'var(--card-2)', padding: '4px 8px', borderRadius: 3, fontSize: 13.5, wordBreak: 'break-all' }}>{link}</code>
@@ -242,7 +323,7 @@ function Editor() {
       </div>
 
       <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 0', background: 'var(--bg)', marginTop: 12 }}>
-        <button style={btn('ghost')} onClick={restaurar}>Voltar ao padrão</button>
+        <button style={btn('ghost')} onClick={() => nav('/quiz-perfil')}>Voltar</button>
         <button style={btn('primary')} disabled={salvando} onClick={salvar}>Salvar quiz</button>
       </div>
     </div>

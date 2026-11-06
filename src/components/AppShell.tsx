@@ -12,7 +12,7 @@ type Item = { path: string; label: string; icon: typeof Home; badge?: 'pendencia
 const EQUIPE_CADASTRO = ['diretoria', 'analise', 'administrativo']
 const NAV: Item[] = [
   { path: '/', label: 'Painel', icon: Home, cargos: [...EQUIPE_CADASTRO, 'consultora'] },
-  { path: '/quiz-perfil', label: 'Quiz de perfil', icon: Sparkles, cargos: EQUIPE_CADASTRO },
+  { path: '/quiz-perfil', label: 'Quizzes de perfil', icon: Sparkles, cargos: EQUIPE_CADASTRO },
   { path: '/cadastros', label: 'Cadastros', icon: ClipboardCheck, badge: 'analise', cargos: [...EQUIPE_CADASTRO, 'consultora'] },
   { path: '/inicializacao', label: 'Inicialização', icon: PackageCheck, badge: 'inicializacao' },
   { path: '/pendencias', label: 'Pendências', icon: ListChecks, badge: 'pendencias' },

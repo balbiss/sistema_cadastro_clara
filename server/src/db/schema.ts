@@ -70,7 +70,7 @@ export const cadastros = pgTable('cadastros', {
   inicializacao: jsonb('inicializacao').$type<Inicializacao>(),
   iniciadaEm: timestamp('iniciada_em', { withTimezone: true }),
   // resumo do quiz de perfil (1ª etapa), quando o cadastro nasceu dele
-  quiz: jsonb('quiz').$type<{ respostaId: number; pontos: number; itens: { pergunta: string; resposta: string; pontos: number }[] }>(),
+  quiz: jsonb('quiz').$type<{ respostaId: number; pontos: number; quizId?: number; quizNome?: string; itens: { pergunta: string; resposta: string; pontos: number }[] }>(),
   cidade: text('cidade'),
   // setor dono da etapa atual (item 7) e descarte LGPD (item 10)
   setor: text('setor'),
@@ -173,6 +173,17 @@ export const assinaturas = pgTable('assinaturas', {
 });
 
 // SQL de criação (o banco local é o PGlite — Postgres dentro do Node, sem Docker).
+// Quizzes de perfil (vários): cada um com link próprio (/quiz/:slug), perguntas, pontos e textos.
+export const quizzes = pgTable('quizzes', {
+  id: serial('id').primaryKey(),
+  slug: text('slug').notNull().unique(),
+  nome: text('nome').notNull(),
+  padrao: boolean('padrao').notNull().default(false), // o que abre em /quiz (sem nome no link)
+  config: jsonb('config').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Toda resposta do quiz de perfil (aprovada ou não) — base do relatório do quiz.
 export const quizRespostas = pgTable('quiz_respostas', {
   id: serial('id').primaryKey(),
@@ -187,6 +198,8 @@ export const quizRespostas = pgTable('quiz_respostas', {
   origem: text('origem'),
   campanha: text('campanha'),
   cadastroId: integer('cadastro_id'),
+  quizId: integer('quiz_id'),
+  quizNome: text('quiz_nome'),
   ip: text('ip'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -251,6 +264,11 @@ CREATE TABLE IF NOT EXISTS quiz_respostas (
   pontos integer NOT NULL, aprovado boolean NOT NULL, eliminatorias jsonb, origem text, campanha text, cadastro_id integer, ip text,
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS quiz_respostas_tel_idx ON quiz_respostas (telefone);
+CREATE TABLE IF NOT EXISTS quizzes (
+  id serial PRIMARY KEY, slug text NOT NULL UNIQUE, nome text NOT NULL, padrao boolean NOT NULL DEFAULT false, config jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE quiz_respostas ADD COLUMN IF NOT EXISTS quiz_id integer;
+ALTER TABLE quiz_respostas ADD COLUMN IF NOT EXISTS quiz_nome text;
 ALTER TABLE pendencias ADD COLUMN IF NOT EXISTS alerta text;
 ALTER TABLE pendencias ADD COLUMN IF NOT EXISTS bloqueia boolean NOT NULL DEFAULT true;
 ALTER TABLE documentos ADD COLUMN IF NOT EXISTS ia jsonb;

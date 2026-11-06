@@ -1,4 +1,7 @@
-import { getSetting, setSetting } from './settings.js';
+import { asc, desc, eq, sql } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { quizzes } from '../db/schema.js';
+import { getSetting } from './settings.js';
 
 // Quiz de perfil: 1ª etapa, link aberto (anúncio, bio do Instagram). Uma pergunta por tela,
 // cada opção vale pontos; passou da nota de corte = perfil aprovado → vira cadastro e o CRM é avisado.
@@ -89,11 +92,35 @@ export const QUIZ_PADRAO: Quiz = {
   textoLgpd: 'Concordo que a Clara Ferreira use estes dados para entrar em contato comigo sobre a revenda.',
 };
 
-export async function getQuiz(): Promise<Quiz> {
-  const q = await getSetting<Partial<Quiz>>('quiz', {});
-  return { ...QUIZ_PADRAO, ...(q || {}), aprovado: { ...QUIZ_PADRAO.aprovado, ...(q?.aprovado || {}) }, reprovado: { ...QUIZ_PADRAO.reprovado, ...(q?.reprovado || {}) } };
+/** Completa um quiz salvo com os campos do modelo (quiz antigo sem campo novo não quebra). */
+export const completar = (q: Partial<Quiz> | null | undefined): Quiz => ({ ...QUIZ_PADRAO, ...(q || {}),
+  aprovado: { ...QUIZ_PADRAO.aprovado, ...(q?.aprovado || {}) }, reprovado: { ...QUIZ_PADRAO.reprovado, ...(q?.reprovado || {}) } });
+
+export const slugify = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'quiz';
+export async function slugLivre(base: string, ignorarId?: number) {
+  let slug = slugify(base), n = 1;
+  for (;;) {
+    const [x] = await db.select({ id: quizzes.id }).from(quizzes).where(eq(quizzes.slug, slug)).limit(1);
+    if (!x || x.id === ignorarId) return slug;
+    slug = slugify(base) + '-' + ++n;
+  }
 }
-export const salvarQuiz = (q: Quiz) => setSetting('quiz', q);
+
+/** 1ª vez: o quiz único antigo (setting 'quiz') vira o quiz padrão "Quiz de perfil", no mesmo link /quiz. */
+export async function garantirQuizzes() {
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(quizzes);
+  if (n > 0) return;
+  const antigo = await getSetting<Partial<Quiz> | null>('quiz', null as any);
+  await db.insert(quizzes).values({ slug: 'perfil', nome: 'Quiz de perfil', padrao: true, config: completar(antigo && Object.keys(antigo).length ? antigo : QUIZ_PADRAO) });
+}
+
+/** Quiz pelo link: /quiz/:slug, ou o padrão em /quiz. */
+export async function quizPorSlug(slug?: string) {
+  const [row] = slug
+    ? await db.select().from(quizzes).where(eq(quizzes.slug, slug)).limit(1)
+    : await db.select().from(quizzes).orderBy(desc(quizzes.padrao), asc(quizzes.id)).limit(1);
+  return row ? { ...row, config: completar(row.config as Partial<Quiz>) } : null;
+}
 
 /** O que o navegador recebe: sem pontos e sem saber o que elimina. */
 export function quizPublico(q: Quiz) {
