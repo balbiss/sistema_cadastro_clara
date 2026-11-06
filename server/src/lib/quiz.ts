@@ -1,6 +1,6 @@
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { quizzes } from '../db/schema.js';
+import { quizRespostas, quizzes } from '../db/schema.js';
 import { getSetting } from './settings.js';
 
 // Quiz de perfil: 1ª etapa, link aberto (anúncio, bio do Instagram). Uma pergunta por tela,
@@ -111,7 +111,9 @@ export async function garantirQuizzes() {
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(quizzes);
   if (n > 0) return;
   const antigo = await getSetting<Partial<Quiz> | null>('quiz', null as any);
-  await db.insert(quizzes).values({ slug: 'perfil', nome: 'Quiz de perfil', padrao: true, config: completar(antigo && Object.keys(antigo).length ? antigo : QUIZ_PADRAO) });
+  const [q] = await db.insert(quizzes).values({ slug: 'perfil', nome: 'Quiz de perfil', padrao: true, config: completar(antigo && Object.keys(antigo).length ? antigo : QUIZ_PADRAO) }).returning();
+  // respostas de antes (quando só existia 1 quiz) passam a contar nele
+  await db.update(quizRespostas).set({ quizId: q.id, quizNome: q.nome }).where(isNull(quizRespostas.quizId));
 }
 
 /** Quiz pelo link: /quiz/:slug, ou o padrão em /quiz. */
