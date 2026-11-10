@@ -8,7 +8,7 @@ import { soDigitos } from './util.js';
 
 export type NovoCadastro = {
   nome: string; telefone?: string | null; email?: string | null; cpf?: string | null;
-  crmLeadId?: string | null; crmContactId?: string | null; consultoraNome?: string | null; origem?: string | null; campanha?: string | null;
+  crmLeadId?: string | null; crmContactId?: string | null; consultoraNome?: string | null; consultoraEmail?: string | null; crmUserId?: string | null; origem?: string | null; campanha?: string | null;
   cidade?: string | null; quiz?: typeof cadastros.$inferInsert['quiz'];
   /** veio do quiz de perfil: nasce em "Perfil aprovado (quiz)", sem link enviado ainda */
   doQuiz?: boolean;
@@ -24,7 +24,7 @@ export async function criarCadastro(d: NovoCadastro, autor: string) {
     setor, responsavelId: (setor && setores.responsaveis[setor]) || null,
     codigo: 'tmp-' + crypto.randomUUID(), formToken: crypto.randomBytes(18).toString('base64url'),
     nome: d.nome.trim(), telefone: soDigitos(d.telefone) || null, email: d.email || null, cpf: soDigitos(d.cpf) || null,
-    crmLeadId: d.crmLeadId || null, crmContactId: d.crmContactId || null, consultoraNome: d.consultoraNome || null,
+    crmLeadId: d.crmLeadId || null, crmContactId: d.crmContactId || null, consultoraNome: d.consultoraNome || null, consultoraEmail: d.consultoraEmail || null, crmUserId: d.crmUserId || null,
     origem: d.origem || null, campanha: d.campanha || null,
     cidade: d.cidade || null, quiz: d.quiz || null,
     status: d.doQuiz ? 'quiz_aprovado' : 'formulario_enviado', formEnviadoEm: d.doQuiz ? null : agora, etapaEntradaEm: agora,

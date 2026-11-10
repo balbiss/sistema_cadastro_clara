@@ -91,7 +91,7 @@ const m = await novo('L3-' + sufixo, 'Carla Media', '39053344705'); await preenc
 d = await statusApos(m); t('restrição R$850 sem avalista → Pendente de avalista', d.cadastro.status === 'pendente_avalista', d.cadastro.status);
 t('pendência "conseguir avalista" aberta', d.pendencias.some(p => !p.resolvidaEm && p.descricao.includes('avalista')));
 t('cliente vê etapa avalista', (await req('GET', `/api/publico/${m.token}`)).json.etapa === 'avalista');
-await req('POST', `/api/publico/${m.token}/avalista`, { body: { nome: 'Pedro Avalista', cpf: '529.982.247-25', dataNascimento: '1970-01-01' } });
+await req('POST', `/api/publico/${m.token}/avalista`, { body: { nome: 'Pedro Avalista', cpf: '123.456.780-62', dataNascimento: '1970-01-01' } });
 d = await statusApos(m); t('avalista nada consta → Aprovado com avalista', d.cadastro.status === 'aprovado_avalista', d.cadastro.status + ' ' + d.cadastro.motivo);
 t('2 consultas (titular + avalista)', d.consultas.length === 2);
 
@@ -222,7 +222,7 @@ const [sTit, sAv] = ['titular', 'avalista'].map(p => d.formalizacao.assinaturas.
 await req('POST', `/api/assinatura/${sTit}`, { body: { cpf: '39053344705', aceite: true } });
 d = await dossie(m.id);
 t('só a cliente assinou → ainda aguardando o avalista', d.cadastro.status === 'aguardando_assinatura' && /avalista/.test(d.liberacao.find(r => r.chave === 'assinaturas').detalhe));
-await req('POST', `/api/assinatura/${sAv}`, { body: { cpf: '52998224725', aceite: true } });
+await req('POST', `/api/assinatura/${sAv}`, { body: { cpf: '12345678062', aceite: true } });
 d = await dossie(m.id);
 t('avalista assinou → inicialização online (montagem)', d.cadastro.status === 'inicializacao' && d.cadastro.inicEtapa === 'montagem', d.cadastro.inicEtapa);
 t('frete exige valor', (await ini(m.id, 'informar_frete', { carga: 'CG-202' })).status === 409);

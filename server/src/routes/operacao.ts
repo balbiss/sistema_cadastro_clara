@@ -112,7 +112,7 @@ operacaoRouter.get('/api/relatorios', exigir(PODE.relatorios, 'Relatórios: só 
     { chave: 'aprovado', nome: 'Crédito aprovado', n: conta('aprovado') },
     { chave: 'docsOk', nome: 'Documentação completa', n: conta('docsOk') },
     { chave: 'assinado', nome: 'Contrato assinado', n: conta('assinado') },
-    { chave: 'liberado', nome: 'Liberada p/ inicialização', n: conta('liberado') },
+    { chave: 'liberado', nome: 'Cadastro aprovado (liberada)', n: conta('liberado') },
     { chave: 'iniciada', nome: 'Revendedora iniciada', n: conta('iniciada') },
   ];
   const decisoes = { aprovados: conta('aprovado'), comAvalista: conta('avalista'), reprovados: conta('reprovado'), desistencias: conta('desistencia'),

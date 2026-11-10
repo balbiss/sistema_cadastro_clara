@@ -35,6 +35,9 @@ export const cadastros = pgTable('cadastros', {
   crmLeadId: text('crm_lead_id').unique(),
   crmContactId: text('crm_contact_id'),
   consultoraNome: text('consultora_nome'),
+  // atendente do CRM que mandou o link (e-mail = login dela no CRM; liga com o usuário daqui se existir)
+  consultoraEmail: text('consultora_email'),
+  crmUserId: text('crm_user_id'),
   origem: text('origem'),
   campanha: text('campanha'),
   // formulário
@@ -89,6 +92,10 @@ export const consultasCredito = pgTable('consultas_credito', {
   cpf: text('cpf').notNull(),
   provedor: text('provedor').notNull(),
   resultado: jsonb('resultado').notNull(),
+  // consulta paga uma vez por CPF dentro do prazo (Regras): as outras apontam pra original e não custam
+  reaproveitadaDe: integer('reaproveitada_de'),
+  nome: text('nome'),
+  autor: text('autor'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -276,6 +283,12 @@ ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS setor text;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS descartado_em timestamptz;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS jueri_id text;
 ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS jueri jsonb;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS consultora_email text;
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS crm_user_id text;
+ALTER TABLE consultas_credito ADD COLUMN IF NOT EXISTS reaproveitada_de integer;
+ALTER TABLE consultas_credito ADD COLUMN IF NOT EXISTS nome text;
+ALTER TABLE consultas_credito ADD COLUMN IF NOT EXISTS autor text;
+CREATE INDEX IF NOT EXISTS consultas_credito_cpf_idx ON consultas_credito (cpf);
 CREATE TABLE IF NOT EXISTS formalizacoes (
   id serial PRIMARY KEY, cadastro_id integer NOT NULL, versao integer NOT NULL, contrato text NOT NULL, promissoria text NOT NULL,
   valor integer NOT NULL, hash text NOT NULL, provedor text NOT NULL, criado_por text, cancelada_em timestamptz, concluida_em timestamptz,

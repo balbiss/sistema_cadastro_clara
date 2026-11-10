@@ -17,6 +17,8 @@ export type Regras = {
   acaoProtesto: Acao;
   acaoNomeDivergente: Acao;
   acaoAvalistaComRestricao: Acao;
+  /** consulta ao SPC vale por esse tempo pro MESMO CPF (qualquer cadastro, qualquer colaboradora) */
+  validadeConsultaMeses: number;
 };
 
 // Ponto de partida até a Bel definir as regras de verdade (o briefing diz que ainda estão em definição).
@@ -34,6 +36,7 @@ export const REGRAS_PADRAO: Regras = {
   acaoProtesto: 'analise_humana',
   acaoNomeDivergente: 'analise_humana',
   acaoAvalistaComRestricao: 'reprovar',
+  validadeConsultaMeses: 3,
 };
 
 // Prazo de cada etapa em horas (item 3/10 do briefing). Passou do prazo = pendência vencida.

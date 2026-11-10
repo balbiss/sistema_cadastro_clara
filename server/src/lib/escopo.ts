@@ -10,7 +10,7 @@ import { cadastros } from '../db/schema.js';
 //                   inicialização/entrega; não vê SPC nem arquivos de documento
 export const CARGOS = ['diretoria', 'analise', 'administrativo', 'logistica', 'consultora'] as const;
 export type Cargo = typeof CARGOS[number];
-type U = { id: number; name: string; role: string };
+type U = { id: number; name: string; role: string; email?: string };
 
 export const STATUS_LOGISTICA = ['inicializacao', 'iniciada'];
 export const restrito = (u: U) => u.role === 'logistica' || u.role === 'consultora';
@@ -18,14 +18,16 @@ export const restrito = (u: U) => u.role === 'logistica' || u.role === 'consulto
 /** Condição SQL dos cadastros que a pessoa enxerga (undefined = todos). */
 export function filtroCadastros(u: U): SQL | undefined {
   if (u.role === 'logistica') return inArray(cadastros.status, STATUS_LOGISTICA);
-  if (u.role === 'consultora') return or(eq(cadastros.responsavelId, u.id), sql`lower(trim(${cadastros.consultoraNome})) = lower(trim(${u.name}))`);
+  if (u.role === 'consultora') return or(eq(cadastros.responsavelId, u.id), sql`lower(trim(${cadastros.consultoraNome})) = lower(trim(${u.name}))`,
+    ...(u.email ? [eq(cadastros.consultoraEmail, u.email.toLowerCase())] : []));
   return undefined;
 }
 export const comFiltro = (u: U, ...conds: (SQL | undefined)[]) => and(...[filtroCadastros(u), ...conds].filter(Boolean) as SQL[]);
 
 /** Mesma regra pra um cadastro já carregado. */
-export function podeVer(u: U, c: { status: string; responsavelId: number | null; consultoraNome: string | null }) {
+export function podeVer(u: U, c: { status: string; responsavelId: number | null; consultoraNome: string | null; consultoraEmail?: string | null }) {
   if (u.role === 'logistica') return STATUS_LOGISTICA.includes(c.status);
-  if (u.role === 'consultora') return c.responsavelId === u.id || (c.consultoraNome || '').trim().toLowerCase() === u.name.trim().toLowerCase();
+  if (u.role === 'consultora') return c.responsavelId === u.id || (c.consultoraNome || '').trim().toLowerCase() === u.name.trim().toLowerCase()
+    || (!!u.email && !!c.consultoraEmail && c.consultoraEmail === u.email.toLowerCase());
   return true;
 }

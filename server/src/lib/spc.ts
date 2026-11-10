@@ -9,6 +9,8 @@ export type ResultadoSpc = {
   negativacoes: Negativacao[];
   protestos: Protesto[];
   totalNegativado: number;
+  /** score de crédito (0–1000), quando o bureau devolve */
+  score?: number | null;
 };
 
 // Provedor de consulta. Por enquanto só existe o "simulado": a Bel ainda não definiu o bureau
@@ -33,6 +35,7 @@ function simular(cenario: CenarioSpc, nome: string): ResultadoSpc {
     case 'nome_divergente': r.nomeConsultado = 'Nome Completamente Diferente da Silva'; r.situacao = 'nada_consta'; break;
     default: r.situacao = 'nada_consta';
   }
+  r.score = ({ nada_consta: 780, negativacao_pequena: 610, negativacao_media: 470, negativacao_grande: 290, credor_semijoias: 420, protesto: 350, nome_divergente: 700 } as Record<string, number>)[cenario] ?? 700;
   r.totalNegativado = r.negativacoes.reduce((s, n) => s + n.valor, 0);
   if (!r.negativacoes.length && !r.protestos.length) r.situacao = 'nada_consta';
   return r;

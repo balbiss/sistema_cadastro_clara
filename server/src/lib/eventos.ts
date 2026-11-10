@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { cadastros, eventos, users } from '../db/schema.js';
 import { SETORES, getIntegracao, getPrazos, getSetores } from './settings.js';
-import { statusNome, type Status } from './status.js';
+import { situacao, statusNome, type Status } from './status.js';
 
 type Cadastro = typeof cadastros.$inferSelect;
 
@@ -17,7 +17,8 @@ export function resumoParaCrm(c: Cadastro) {
   return {
     id: c.id, codigo: c.codigo, crm_lead_id: c.crmLeadId, crm_contact_id: c.crmContactId,
     nome: c.nome, cpf: c.cpf, telefone: c.telefone, consultora: c.consultoraNome, origem: c.origem, campanha: c.campanha,
-    status: c.status, status_nome: statusNome(c.status), motivo: c.motivo, decidido_por: c.decididoPor,
+    status: c.status, status_nome: statusNome(c.status), situacao: situacao(c).chave, situacao_nome: situacao(c).nome,
+    consultora_email: c.consultoraEmail, crm_user_id: c.crmUserId, motivo: c.motivo, decidido_por: c.decididoPor,
     modalidade: c.modalidade, valor_credito: c.valorCredito, liberado_em: c.liberadoEm, inicializacao_etapa: c.inicEtapa,
     inicializacao: c.inicializacao, iniciada_em: c.iniciadaEm, etapa_entrada_em: c.etapaEntradaEm, prazo_etapa: c.prazoEtapa,
     cidade: c.cidade, quiz: c.quiz ? { pontos: c.quiz.pontos, respostas: c.quiz.itens.map(i => ({ pergunta: i.pergunta, resposta: i.resposta })) } : null,

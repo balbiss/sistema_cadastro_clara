@@ -2,14 +2,14 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { cadastros, eventos, users } from '../db/schema.js';
+import { cadastros, eventos, pendencias, users } from '../db/schema.js';
 import { assinarToken, exigir, PODE, requireApiKey, requireAuth } from '../lib/auth.js';
 import { CENARIOS_PADRAO, MODELOS_PADRAO, PRAZOS_PADRAO, REGRAS_PADRAO, getCenarios, getIntegracao, getModelos, getPrazos, getRegras, setSetting } from '../lib/settings.js';
 import { criarCadastro } from '../lib/cadastros.js';
-import { enviarPendentesAoCrm, linkFormulario, mudarStatus, resumoParaCrm } from '../lib/eventos.js';
-import { ACOES, STATUS } from '../lib/status.js';
+import { enviarPendentesAoCrm, linkFormulario, mudarStatus, registrarEvento, resumoParaCrm } from '../lib/eventos.js';
+import { ACOES, STATUS, situacao } from '../lib/status.js';
 import { CARGOS } from '../lib/escopo.js';
 
 export const configRouter = Router();
@@ -38,6 +38,7 @@ configRouter.put('/api/config/regras', requireAuth, soDiretoria, async (req, res
       naoConsultarRestricaoSemAvalista: z.boolean(), limiteSemAvalista: z.number().min(0), limiteComAvalista: z.number().min(0),
       acaoAcimaLimite: acao, palavrasCredorSemijoias: z.array(z.string()), acaoCredorSemijoias: acao, acaoProtesto: acao,
       acaoNomeDivergente: acao, acaoAvalistaComRestricao: acao,
+      validadeConsultaMeses: z.number().int().min(0).max(24),
     }),
     prazos: z.record(z.number().min(0)),
     cenarios: z.record(z.enum(['nada_consta', 'negativacao_pequena', 'negativacao_media', 'negativacao_grande', 'credor_semijoias', 'protesto', 'nome_divergente'])),
@@ -110,32 +111,66 @@ configRouter.post('/api/config/integracao/reenviar', requireAuth, soDiretoria, a
   res.json({ ok: true });
 });
 
-// Entrada do CRM (X-Api-Key): a consultora clica "Enviar formulário" no card → o CRM chama aqui,
-// recebe o link e manda pelo WhatsApp. Mesmo lead de novo = mesmo cadastro (não duplica).
+// Entrada do CRM (X-Api-Key): a atendente clica "Formulário de cadastro" na conversa → o CRM chama
+// aqui com o lead e QUEM é a atendente (nome + e-mail + id no CRM), recebe o link e manda pelo WhatsApp.
+// Mesmo lead de novo = mesmo cadastro (não duplica). Cadastro que já é de OUTRA atendente não troca de
+// dona sozinho: devolve o aviso e abre pendência pra gerência decidir (relatório de ajustes, item 4).
 configRouter.post('/api/integracao/cadastros', requireApiKey, async (req, res) => {
+  const id = z.union([z.string(), z.number()]).transform(String);
   const p = z.object({
-    crm_lead_id: z.union([z.string(), z.number()]).transform(String), crm_contact_id: z.union([z.string(), z.number()]).transform(String).optional(),
+    crm_lead_id: id, crm_contact_id: id.optional(),
     nome: z.string().min(2), telefone: z.string().optional(), email: z.string().optional(), cpf: z.string().optional(),
-    consultora: z.string().optional(), origem: z.string().optional(), campanha: z.string().optional(),
+    consultora: z.string().optional(), consultora_email: z.string().optional(), crm_user_id: id.optional(),
+    origem: z.string().optional(), campanha: z.string().optional(),
     cadastro_id: z.coerce.number().int().optional(), // veio do aviso quiz_aprovado: continua o MESMO cadastro
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Campos obrigatórios: crm_lead_id e nome', detalhes: p.error.flatten() });
   const d = p.data;
+  const email = d.consultora_email?.trim().toLowerCase() || undefined;
+  const dona = { consultoraNome: d.consultora || null, consultoraEmail: email || null, crmUserId: d.crm_user_id || null };
   let [existe] = await db.select().from(cadastros).where(eq(cadastros.crmLeadId, d.crm_lead_id)).limit(1);
   if (!existe && d.cadastro_id) {
     const [doQuiz] = await db.select().from(cadastros).where(eq(cadastros.id, d.cadastro_id)).limit(1);
     if (doQuiz && (!doQuiz.crmLeadId || doQuiz.crmLeadId === d.crm_lead_id)) {
-      await db.update(cadastros).set({ crmLeadId: d.crm_lead_id, crmContactId: d.crm_contact_id || doQuiz.crmContactId, consultoraNome: d.consultora || doQuiz.consultoraNome, updatedAt: new Date() }).where(eq(cadastros.id, doQuiz.id));
-      existe = { ...doQuiz, crmLeadId: d.crm_lead_id, consultoraNome: d.consultora || doQuiz.consultoraNome };
+      await db.update(cadastros).set({ crmLeadId: d.crm_lead_id, crmContactId: d.crm_contact_id || doQuiz.crmContactId, updatedAt: new Date() }).where(eq(cadastros.id, doQuiz.id));
+      existe = { ...doQuiz, crmLeadId: d.crm_lead_id };
     }
   }
-  // cadastro do quiz: a consultora mandou o formulário completo → passa pra "Formulário enviado"
-  if (existe?.status === 'quiz_aprovado') {
+  let aviso: string | null = null;
+  if (existe && d.consultora) {
+    const semDona = !existe.consultoraNome && !existe.consultoraEmail;
+    const mesma = (!!email && existe.consultoraEmail === email) || (!!d.crm_user_id && existe.crmUserId === d.crm_user_id)
+      || (!existe.consultoraEmail && (existe.consultoraNome || '').trim().toLowerCase() === d.consultora.trim().toLowerCase());
+    if (semDona) {
+      // ex.: veio do quiz (tráfego) sem ninguém — a 1ª atendente que manda o formulário fica com ele
+      [existe] = await db.update(cadastros).set({ ...dona, updatedAt: new Date() }).where(eq(cadastros.id, existe.id)).returning();
+      await registrarEvento(existe.id, 'consultora_definida', 'Atendente do cadastro: ' + d.consultora, d.consultora, { ...dona });
+    } else if (mesma) {
+      // mesma pessoa: completa e-mail/id se o cadastro antigo só tinha o nome
+      if (!existe.consultoraEmail || !existe.crmUserId)
+        [existe] = await db.update(cadastros).set({ consultoraEmail: existe.consultoraEmail || dona.consultoraEmail, crmUserId: existe.crmUserId || dona.crmUserId }).where(eq(cadastros.id, existe.id)).returning();
+    } else {
+      const desde = existe.createdAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      aviso = 'Esta pessoa já tem cadastro (' + existe.codigo + ', ' + situacao(existe).nome + ') com ' + (existe.consultoraNome || 'outra atendente')
+        + ', iniciado em ' + desde + '. A gerência foi avisada pra decidir quem fica com ele.';
+      const chave = 'abordagem:' + (email || d.consultora);
+      const [aberta] = await db.select({ id: pendencias.id }).from(pendencias).where(and(eq(pendencias.cadastroId, existe.id), eq(pendencias.alerta, chave), isNull(pendencias.resolvidaEm))).limit(1);
+      if (!aberta) {
+        await db.insert(pendencias).values({ cadastroId: existe.id, alerta: chave, bloqueia: false, criadaPor: d.consultora,
+          descricao: 'Gerência: ' + d.consultora + ' também está atendendo esta pessoa (cadastro de ' + (existe.consultoraNome || '—') + '). Decidir quem fica com o cadastro.' });
+        await registrarEvento(existe.id, 'nova_abordagem', d.consultora + ' pediu o formulário de um cadastro que é de ' + (existe.consultoraNome || 'outra atendente'), d.consultora,
+          { nova: dona, atual: { nome: existe.consultoraNome, email: existe.consultoraEmail, crm_user_id: existe.crmUserId } });
+      }
+    }
+  }
+  // cadastro do quiz: a atendente mandou o formulário completo → passa pra "Formulário enviado"
+  if (existe?.status === 'quiz_aprovado' && !aviso) {
     existe = await mudarStatus(existe, 'formulario_enviado', null, d.consultora || 'CRM', { formEnviadoEm: new Date() });
   }
   const c = existe || await criarCadastro({ nome: d.nome, telefone: d.telefone, email: d.email, cpf: d.cpf, crmLeadId: d.crm_lead_id, crmContactId: d.crm_contact_id,
-    consultoraNome: d.consultora, origem: d.origem, campanha: d.campanha }, 'CRM');
-  res.status(existe ? 200 : 201).json({ ...resumoParaCrm(c), ja_existia: !!existe, link_formulario: linkFormulario(c) });
+    consultoraNome: d.consultora, consultoraEmail: email, crmUserId: d.crm_user_id,
+    origem: d.origem || (d.consultora ? 'Prospecção ativa' : undefined), campanha: d.campanha }, d.consultora || 'CRM');
+  res.status(existe ? 200 : 201).json({ ...resumoParaCrm(c), ja_existia: !!existe, aviso, link_formulario: linkFormulario(c) });
 });
 configRouter.get('/api/integracao/cadastros/:crmLeadId', requireApiKey, async (req, res) => {
   const [c] = await db.select().from(cadastros).where(eq(cadastros.crmLeadId, req.params.crmLeadId)).limit(1);

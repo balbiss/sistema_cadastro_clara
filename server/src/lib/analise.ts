@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, ne } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { cadastros, consultasCredito, pendencias, type Checagem } from '../db/schema.js';
 import { consultarCpf, PROVEDOR, type ResultadoSpc } from './spc.js';
@@ -100,20 +100,32 @@ function avaliarSpc(spc: ResultadoSpc, nome: string, r: Regras, check: (regra: s
     spc.protestos.length ? 'Protesto: ' + spc.protestos.map(p => `${p.cartorio} (${brl(p.valor)})`).join(', ') : 'Sem protestos', r.acaoProtesto);
 }
 
-const VALIDADE_CONSULTA_DIAS = 30;
-
+/** Itens 2.2/2.3 do relatório de ajustes: cada consulta é paga, então o MESMO CPF só é consultado de
+ *  novo depois do prazo das Regras (validadeConsultaMeses), não importa o cadastro nem a colaboradora.
+ *  Dentro do prazo, a consulta original é reaproveitada e fica registrada como "reaproveitada" (custo zero). */
 async function consultar(c: Cadastro, pessoa: 'titular' | 'avalista', cpf: string, nome: string, autor: string) {
-  // cada consulta é paga: na reanálise (ex.: chegou o avalista) reaproveita a consulta recente
-  const [recente] = await db.select().from(consultasCredito)
-    .where(and(eq(consultasCredito.cadastroId, c.id), eq(consultasCredito.cpf, cpf),
-      gt(consultasCredito.createdAt, new Date(Date.now() - VALIDADE_CONSULTA_DIAS * 86400_000))))
-    .orderBy(desc(consultasCredito.id)).limit(1);
-  if (recente) return recente.resultado as ResultadoSpc;
+  const { validadeConsultaMeses } = await getRegras();
+  const desde = new Date(); desde.setMonth(desde.getMonth() - (validadeConsultaMeses ?? 3));
+  const [original] = validadeConsultaMeses > 0 ? await db.select().from(consultasCredito)
+    .where(and(eq(consultasCredito.cpf, cpf), isNull(consultasCredito.reaproveitadaDe), gt(consultasCredito.createdAt, desde),
+      sql`coalesce((${consultasCredito.resultado}->>'descartado')::boolean, false) = false`))
+    .orderBy(desc(consultasCredito.id)).limit(1) : [];
+  if (original) {
+    const [jaNoCadastro] = await db.select({ id: consultasCredito.id }).from(consultasCredito)
+      .where(and(eq(consultasCredito.cadastroId, c.id), eq(consultasCredito.cpf, cpf), or(eq(consultasCredito.id, original.id), eq(consultasCredito.reaproveitadaDe, original.id)))).limit(1);
+    if (!jaNoCadastro) {
+      await db.insert(consultasCredito).values({ cadastroId: c.id, pessoa, cpf, nome, autor, provedor: original.provedor, resultado: original.resultado, reaproveitadaDe: original.id });
+      const quando = original.createdAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      await registrarEvento(c.id, 'spc_reaproveitado', `SPC (${pessoa}) não consultado de novo: reaproveitada a consulta de ${quando} (prazo de ${validadeConsultaMeses} meses)`, autor,
+        { pessoa, consulta_original: original.id, consultado_em: original.createdAt });
+    }
+    return original.resultado as ResultadoSpc;
+  }
   const resultado = await consultarCpf(cpf, nome);
-  await db.insert(consultasCredito).values({ cadastroId: c.id, pessoa, cpf, provedor: PROVEDOR, resultado });
+  await db.insert(consultasCredito).values({ cadastroId: c.id, pessoa, cpf, nome, autor, provedor: PROVEDOR, resultado });
   await registrarEvento(c.id, 'spc_consultado',
     `SPC consultado (${pessoa}): ${resultado.situacao === 'nada_consta' ? 'nada consta' : 'com restrições — ' + brl(resultado.totalNegativado)}`,
-    autor, { pessoa, situacao: resultado.situacao, total: resultado.totalNegativado, protestos: resultado.protestos.length });
+    autor, { pessoa, situacao: resultado.situacao, total: resultado.totalNegativado, protestos: resultado.protestos.length, score: resultado.score ?? null });
   return resultado;
 }
 

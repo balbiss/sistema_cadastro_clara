@@ -54,7 +54,7 @@ export default function CadastroDetalhe() {
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.codigo}{c.crmLeadId ? ` · lead ${c.crmLeadId} no CRM` : ''}</div>
             <h1 style={{ margin: '2px 0 8px', fontSize: 24 }}>{c.nome}</h1>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <StatusPill status={c.status} grande />
+              <StatusPill status={c.status} inicEtapa={c.inicEtapa} grande />
               {c.setor && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Setor: <b style={{ color: 'var(--ink)' }}>{SETORES[c.setor] || c.setor}</b></span>}
               {c.status === 'inicializacao' && <span style={{ fontSize: 13, fontWeight: 700 }}>{c.modalidade === 'online' ? 'Online' : 'Presencial'} · {ETAPA_INIC[c.inicEtapa] || c.inicEtapa}</span>}
               {!encerrado && <span style={{ fontSize: 13 }}>Prazo da etapa: <Prazo prazo={c.prazoEtapa} /></span>}

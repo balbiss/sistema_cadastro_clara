@@ -20,6 +20,7 @@ import Quiz from './pages/Quiz'
 import QuizConfig from './pages/QuizConfig'
 import Relatorios from './pages/Relatorios'
 import Operacao from './pages/Operacao'
+import ConsultasSpc from './pages/ConsultasSpc'
 
 const Logado = ({ children }: { children: ReactNode }) => (tokenAtual() ? <>{children}</> : <Navigate to="/login" replace />)
 // Logística só trabalha na fila de inicialização
@@ -45,6 +46,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/modelos" element={<Modelos />} />
           <Route path="/regras" element={<Regras />} />
           <Route path="/relatorios" element={<Relatorios />} />
+          <Route path="/consultas-spc" element={<ConsultasSpc />} />
           <Route path="/operacao" element={<Operacao />} />
           <Route path="/integracao" element={<Integracao />} />
           <Route path="/usuarios" element={<Usuarios />} />

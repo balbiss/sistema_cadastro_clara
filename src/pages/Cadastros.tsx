@@ -7,7 +7,7 @@ import { cpfFmt, desde, telFmt } from '../lib/fmt'
 import { Modal, btn, inputStyle, labelStyle } from '../components/ui'
 import { Carregando, PageHeader, Prazo, StatusPill, toast, vazio } from '../components/extra'
 
-type Linha = { id: number; codigo: string; nome: string; cpf: string | null; telefone: string | null; consultora: string | null; origem: string | null; status: string; motivo: string | null; etapaEntradaEm: string; prazoEtapa: string | null; responsavel: string | null; pendencias: number; crmLeadId: string | null }
+type Linha = { id: number; codigo: string; nome: string; cpf: string | null; telefone: string | null; consultora: string | null; origem: string | null; status: string; motivo: string | null; etapaEntradaEm: string; prazoEtapa: string | null; responsavel: string | null; pendencias: number; crmLeadId: string | null; inicEtapa?: string | null }
 
 export default function Cadastros() {
   const nav = useNavigate()
@@ -64,7 +64,7 @@ export default function Cadastros() {
                     <td style={{ whiteSpace: 'nowrap' }}>{l.cpf ? cpfFmt(l.cpf) : '—'}</td>
                     <td>{l.consultora || '—'}</td>
                     <td>{l.origem || '—'}</td>
-                    <td><StatusPill status={l.status} />{l.motivo && <div title={l.motivo} style={{ fontSize: 12, color: 'var(--muted)', maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>{l.motivo}</div>}</td>
+                    <td><StatusPill status={l.status} inicEtapa={l.inicEtapa} />{l.motivo && <div title={l.motivo} style={{ fontSize: 12, color: 'var(--muted)', maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>{l.motivo}</div>}</td>
                     <td style={{ whiteSpace: 'nowrap', color: 'var(--muted)' }}>{desde(l.etapaEntradaEm)}</td>
                     <td><Prazo prazo={FINAIS.includes(l.status) ? null : l.prazoEtapa} /></td>
                     <td>{l.responsavel || <span style={{ color: 'var(--muted)' }}>—</span>}</td>

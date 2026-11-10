@@ -1,21 +1,29 @@
 // Situações do cadastro. O CRM recebe o `status` em todo aviso e usa pra mover o card no funil.
 export const STATUS = {
-  quiz_aprovado: 'Perfil aprovado (quiz)',
+  quiz_aprovado: 'Qualificação aprovada',
   formulario_enviado: 'Formulário enviado',
-  formulario_preenchido: 'Formulário preenchido',
-  pendente_avalista: 'Pendente de avalista',
+  formulario_preenchido: 'Em análise de crédito',
+  pendente_avalista: 'Aguardando avalista',
   analise_humana: 'Análise humana',
-  aprovado: 'Aprovado',
-  aprovado_avalista: 'Aprovado com avalista',
+  aprovado: 'Crédito aprovado',
+  aprovado_avalista: 'Crédito aprovado com avalista',
   documentos_ok: 'Documentação conferida',
   aguardando_assinatura: 'Aguardando assinatura',
-  inicializacao: 'Liberada — em inicialização',
+  inicializacao: 'Cadastro aprovado',
   iniciada: 'Revendedora iniciada',
   reprovado: 'Reprovado',
   desistencia: 'Desistência',
 } as const;
 export type Status = keyof typeof STATUS;
 export const statusNome = (s: string) => STATUS[s as Status] ?? s;
+// Relatório de ajustes (06/11) item 1: "Cadastro aprovado" (liberada), "Iniciação agendada" e
+// "Revendedora iniciada" são acontecimentos diferentes. O agendamento é uma sub-etapa da
+// inicialização presencial; aqui vira uma situação própria pra tela e pro CRM.
+export const AGENDADA = ['agendado', 'carga_pronta'];
+export function situacao(c: { status: string; inicEtapa?: string | null }) {
+  if (c.status === 'inicializacao' && AGENDADA.includes(c.inicEtapa || '')) return { chave: 'iniciacao_agendada', nome: 'Iniciação agendada' };
+  return { chave: c.status, nome: statusNome(c.status) };
+}
 // Etapas em que o cadastro não anda mais (sem prazo, fora do "em andamento").
 export const FINAIS: Status[] = ['iniciada', 'reprovado', 'desistencia'];
 

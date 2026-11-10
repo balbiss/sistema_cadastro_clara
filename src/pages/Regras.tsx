@@ -51,7 +51,14 @@ export default function Regras() {
             {linha('Endereço incompleto', acao('acaoEnderecoIncompleto'))}
             {linha('Declarou restrição e não tem avalista → não consultar o SPC',
               <input disabled={!pode} type="checkbox" checked={r.naoConsultarRestricaoSemAvalista} onChange={e => setR('naoConsultarRestricaoSemAvalista', e.target.checked)} style={{ width: 20, height: 20, accentColor: '#8e2a46' }} />,
-              'Vai direto pra "Pendente de avalista" e não gasta consulta')}
+              'Vai direto pra "Aguardando avalista" e não gasta consulta')}
+          </Card>
+          <Card title="Consulta ao SPC (custo)">
+            {linha('Reaproveitar a consulta do mesmo CPF por',
+              <select disabled={!pode} value={r.validadeConsultaMeses ?? 3} onChange={e => setR('validadeConsultaMeses', Number(e.target.value))} style={{ ...inputStyle, width: 'auto', minWidth: 160 }}>
+                {[0, 1, 2, 3, 6, 12].map(m => <option key={m} value={m}>{m === 0 ? 'Não reaproveitar' : m === 1 ? '1 mês' : m + ' meses'}</option>)}
+              </select>,
+              'Dentro desse prazo o CPF não é consultado de novo (nem por outra colaboradora, nem em outro cadastro): usa a consulta já feita, sem custo')}
           </Card>
           <Card title="Resultado do SPC">
             {linha('Aprova direto com restrições até (R$)', num('limiteSemAvalista'), 'Total negativado até esse valor: aprovado')}

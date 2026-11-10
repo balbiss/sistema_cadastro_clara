@@ -1,13 +1,15 @@
 import type { CSSProperties, ReactNode } from 'react'
 import Swal from 'sweetalert2'
-import { STATUS } from '../lib/status'
+import { STATUS, situacaoNome } from '../lib/status'
 import { prazoTexto } from '../lib/fmt'
 
 export const toast = (title: string, icon: 'success' | 'error' | 'info' = 'success') =>
   void Swal.fire({ toast: true, position: 'top-end', icon, title, showConfirmButton: false, timer: 3200, timerProgressBar: true })
 
-export function StatusPill({ status, grande }: { status: string; grande?: boolean }) {
-  const s = STATUS[status] || { nome: status, cor: '#d5d8db' }
+export function StatusPill({ status, grande, inicEtapa }: { status: string; grande?: boolean; inicEtapa?: string | null }) {
+  const base = STATUS[status] || { nome: status, cor: '#d5d8db' }
+  const nome = situacaoNome({ status, inicEtapa })
+  const s = nome === base.nome ? base : { nome, cor: '#ffb98a' }
   return (
     <span style={{ display: 'inline-block', padding: grande ? '4px 10px' : '2px 8px', borderRadius: 2, background: s.cor, color: '#313942', fontSize: grande ? 13 : 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.02em', whiteSpace: 'nowrap' }}>
       {s.nome}

@@ -24,7 +24,7 @@ const iniciais = (n: string) => n.split(' ').filter(Boolean).map(p => p[0]).slic
 
 // caminho do cadastro (onde cada um está agora)
 const ETAPAS: { chave: string; nome: string; status: string[] }[] = [
-  { chave: 'quiz', nome: 'Perfil aprovado (quiz)', status: ['quiz_aprovado'] },
+  { chave: 'quiz', nome: 'Qualificação aprovada', status: ['quiz_aprovado'] },
   { chave: 'enviado', nome: 'Formulário enviado', status: ['formulario_enviado'] },
   { chave: 'analise', nome: 'Em análise', status: ['formulario_preenchido', 'analise_humana'] },
   { chave: 'avalista', nome: 'Aguardando avalista', status: ['pendente_avalista'] },

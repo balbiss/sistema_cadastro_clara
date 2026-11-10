@@ -112,7 +112,7 @@ cadastrosRouter.get('/api/cadastros', async (req, res) => {
     id: r.id, codigo: r.codigo, nome: r.nome, cpf: r.cpf, telefone: r.telefone, consultora: r.consultoraNome, origem: r.origem,
     status: r.status, statusNome: statusNome(r.status), motivo: r.motivo, etapaEntradaEm: r.etapaEntradaEm, prazoEtapa: r.prazoEtapa,
     responsavel: r.responsavelId ? um.get(r.responsavelId) || null : null, pendencias: pm.get(r.id) || 0, createdAt: r.createdAt,
-    crmLeadId: r.crmLeadId,
+    crmLeadId: r.crmLeadId, inicEtapa: r.inicEtapa,
   })));
 });
 
@@ -145,7 +145,7 @@ cadastrosRouter.get('/api/cadastros/:id', async (req, res) => {
     inicializacao: { etapas: ETAPAS_INIC[modalidadeDe(c)], acoes: Object.entries(ACOES_INIC).filter(([, a]) => a.modalidade === modalidadeDe(c)).map(([k, a]) => ({ chave: k, ...a })) },
     cadastro: { ...c, checagens: limitado ? null : c.checagens, statusNome: statusNome(c.status), linkFormulario: linkFormulario(c), linkDossie: linkDossie(c) },
     consultas: limitado ? [] : consultas, pendencias: pends, equipe,
-    eventos: limitado ? evs.filter(e => !['spc_consultado', 'spc_nao_consultado'].includes(e.tipo)) : evs,
+    eventos: limitado ? evs.filter(e => !['spc_consultado', 'spc_nao_consultado', 'spc_reaproveitado'].includes(e.tipo)) : evs,
     documentos: docs.map(d => ({ ...d, nome: DOC_NOME[d.tipo] || d.tipo, ...(limitado ? { arquivo: null, ia: null } : {}) })),
     situacaoDocs: { situacao: sd.situacao, faltam: sd.faltam, itens: sd.itens.map(i => ({ tipo: i.tipo, nome: i.nome, docId: i.doc?.id ?? null, status: i.doc?.status ?? 'faltando' })) },
     podeDecidir: PODE.decidir(req.user!), podeConferir: PODE.conferir(req.user!), limitado,

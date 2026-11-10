@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ClipboardCheck, FileSignature, Home, ListChecks, LogOut, Menu, PackageCheck, PanelLeft, PlugZap, SlidersHorizontal, Users, X, Sparkles, BarChart3, Network } from 'lucide-react'
+import { ClipboardCheck, FileSignature, Home, ListChecks, LogOut, Menu, PackageCheck, PanelLeft, PlugZap, SlidersHorizontal, Users, X, Sparkles, BarChart3, Network, SearchCheck } from 'lucide-react'
 import { api, usuarioAtual } from '../lib/api'
 import { CARGO } from '../lib/status'
 import { ClaraLogo } from './extra'
@@ -17,6 +17,7 @@ const NAV: Item[] = [
   { path: '/inicializacao', label: 'Inicialização', icon: PackageCheck, badge: 'inicializacao' },
   { path: '/pendencias', label: 'Pendências', icon: ListChecks, badge: 'pendencias' },
   { path: '/relatorios', label: 'Relatórios', icon: BarChart3, cargos: EQUIPE_CADASTRO },
+  { path: '/consultas-spc', label: 'Consultas ao SPC', icon: SearchCheck, cargos: EQUIPE_CADASTRO },
   { path: '/regras', label: 'Regras de análise', icon: SlidersHorizontal, cargos: EQUIPE_CADASTRO },
   { path: '/modelos', label: 'Contrato e promissória', icon: FileSignature, cargos: EQUIPE_CADASTRO },
   { path: '/operacao', label: 'Setores, alertas e LGPD', icon: Network, soDiretoria: true },
