@@ -22,6 +22,7 @@ export default function CadastroDetalhe() {
   const [verDocs, setVerDocs] = useState(false)
   const [refazer, setRefazer] = useState(false)
   const [acaoInic, setAcaoInic] = useState<D | null>(null)
+  const [iaRodando, setIaRodando] = useState<number | null>(null) // hooks sempre antes do "if (!d) return" (React #310)
   const carregar = () => api('GET', '/cadastros/' + id).then(setD)
   useEffect(() => { carregar() }, [id])
   // enquanto a análise automática roda, atualiza sozinho
@@ -35,7 +36,6 @@ export default function CadastroDetalhe() {
 
   const reanalisar = async () => { try { await api('POST', `/cadastros/${c.id}/reanalisar`); toast('Análise refeita'); carregar() } catch (er) { toast((er as Error).message, 'error') } }
   const trocarResp = async (v: string) => { await api('PATCH', '/cadastros/' + c.id, { responsavelId: v ? Number(v) : null }); toast('Responsável alterado'); carregar() }
-  const [iaRodando, setIaRodando] = useState<number | null>(null)
   const rodarIa = async (docId: number) => {
     setIaRodando(docId)
     try { await api('POST', `/documentos/${docId}/ia`); toast('IA leu o documento'); carregar() }
