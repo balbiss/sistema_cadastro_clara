@@ -26,9 +26,9 @@ export default function Integracao() {
       <div className="grid2" style={{ alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card title="1. CRM → Cadastros (abrir cadastro)">
-            <p style={{ fontSize: 13.5, marginTop: 0 }}>Quando a consultora clica <b>“Enviar formulário”</b> no card do lead, o CRM chama este endereço com a chave e recebe o link pra mandar no WhatsApp.</p>
-            <label style={labelStyle}>Endereço da API</label>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}><input readOnly value={d.apiUrl + '/cadastros'} style={inputStyle} /><button style={btn('soft')} onClick={() => copiar(d.apiUrl + '/cadastros')}><Copy size={14} /></button></div>
+            <p style={{ fontSize: 13.5, marginTop: 0 }}>Quando a atendente clica <b>“Gerar formulário de cadastro”</b> na conversa, o CRM chama este endereço com a chave e recebe o link pra mandar no WhatsApp.</p>
+            <label style={labelStyle}>Endereço da API (é o que vai no CRM)</label>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}><input readOnly value={d.apiUrl.replace(/\/api\/integracao$/, '')} style={inputStyle} /><button style={btn('soft')} onClick={() => copiar(d.apiUrl.replace(/\/api\/integracao$/, ''))}><Copy size={14} /></button></div>
             <label style={labelStyle}>Chave de API (header X-Api-Key)</label>
             <div style={{ display: 'flex', gap: 6 }}>
               <input readOnly value={d.apiKey || 'nenhuma — gere uma'} style={inputStyle} />
@@ -44,7 +44,11 @@ export default function Integracao() {
               <button style={btn('primary')} onClick={salvar}>Salvar</button>
               <button style={btn('ghost')} onClick={() => setUrl(crmTeste)}>Usar CRM de teste</button>
             </div>
-            {d.webhookSecret && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 0 }}>Assinatura: header <code>X-Cadastros-Assinatura</code> = sha256 HMAC com o segredo <code style={{ overflowWrap: 'anywhere' }}>{d.webhookSecret}</code></p>}
+            {!url && <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '8px 0 0' }}>CRM da Clara: <button style={{ border: 'none', background: 'none', padding: 0, color: 'var(--terra)', textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5 }} onClick={() => setUrl('https://sistema-api.clarajoias.com.br/webhooks/cadastros')}>https://sistema-api.clarajoias.com.br/webhooks/cadastros</button></p>}
+            {d.webhookSecret && <>
+              <label style={{ ...labelStyle, marginTop: 12 }}>Segredo do webhook (cole no CRM junto com a chave)</label>
+              <div style={{ display: 'flex', gap: 6 }}><input readOnly value={d.webhookSecret} style={inputStyle} /><button style={btn('soft')} onClick={() => copiar(d.webhookSecret)}><Copy size={14} /></button></div>
+            </>}
           </Card>
         </div>
         <Card title="Últimos avisos ao CRM" right={<button style={btn('ghost', { minHeight: 28, padding: '0 10px' })} onClick={reenviar}><RefreshCw size={13} /> Reenviar falhas</button>}>
