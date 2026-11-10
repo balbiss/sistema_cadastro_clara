@@ -12,6 +12,8 @@ export const users = pgTable('users', {
   // administrativo = documentos e pendências (não decide crédito)
   role: text('role').notNull().default('analise'),
   active: boolean('active').notNull().default(true),
+  // código do link pessoal do quiz (?c=codigo): quem entra por ele fica com esta colaboradora, fora do rodízio
+  codigo: text('codigo').unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -191,6 +193,17 @@ export const quizzes = pgTable('quizzes', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Cada visita ao link do quiz (1 por aparelho/sessão) — pra comparar com os cliques que a Meta cobra.
+export const quizCliques = pgTable('quiz_cliques', {
+  id: serial('id').primaryKey(),
+  quizId: integer('quiz_id'),
+  origem: text('origem'),
+  campanha: text('campanha'),
+  colaboradoraId: integer('colaboradora_id'),
+  sessao: text('sessao'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Toda resposta do quiz de perfil (aprovada ou não) — base do relatório do quiz.
 export const quizRespostas = pgTable('quiz_respostas', {
   id: serial('id').primaryKey(),
@@ -207,6 +220,7 @@ export const quizRespostas = pgTable('quiz_respostas', {
   cadastroId: integer('cadastro_id'),
   quizId: integer('quiz_id'),
   quizNome: text('quiz_nome'),
+  colaboradoraId: integer('colaboradora_id'),
   ip: text('ip'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -289,6 +303,13 @@ ALTER TABLE consultas_credito ADD COLUMN IF NOT EXISTS reaproveitada_de integer;
 ALTER TABLE consultas_credito ADD COLUMN IF NOT EXISTS nome text;
 ALTER TABLE consultas_credito ADD COLUMN IF NOT EXISTS autor text;
 CREATE INDEX IF NOT EXISTS consultas_credito_cpf_idx ON consultas_credito (cpf);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo text;
+CREATE UNIQUE INDEX IF NOT EXISTS users_codigo_idx ON users (codigo);
+CREATE TABLE IF NOT EXISTS quiz_cliques (
+  id serial PRIMARY KEY, quiz_id integer, origem text, campanha text, colaboradora_id integer, sessao text,
+  created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS quiz_cliques_data_idx ON quiz_cliques (created_at);
+ALTER TABLE quiz_respostas ADD COLUMN IF NOT EXISTS colaboradora_id integer;
 CREATE TABLE IF NOT EXISTS formalizacoes (
   id serial PRIMARY KEY, cadastro_id integer NOT NULL, versao integer NOT NULL, contrato text NOT NULL, promissoria text NOT NULL,
   valor integer NOT NULL, hash text NOT NULL, provedor text NOT NULL, criado_por text, cancelada_em timestamptz, concluida_em timestamptz,

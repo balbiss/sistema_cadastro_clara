@@ -14,6 +14,7 @@ import { iniciarLgpd } from './lib/lgpd.js';
 import { operacaoRouter } from './routes/operacao.js';
 import { jueriMockRouter } from './routes/jueriMock.js';
 import { consultasRouter } from './routes/consultas.js';
+import { distribuicaoRouter } from './routes/distribuicao.js';
 import { iniciarJueri } from './lib/jueri.js';
 
 process.on('unhandledRejection', err => console.error('Erro não tratado (servidor segue no ar):', err));
@@ -28,6 +29,7 @@ if (process.env.JUERI_MOCK === '1') app.use(jueriMockRouter); // só em teste
 app.use(quizRouter);
 app.use(operacaoRouter);
 app.use(consultasRouter);
+app.use(distribuicaoRouter);
 app.use(publicoRouter);
 app.use(configRouter);
 app.use(cadastrosRouter);

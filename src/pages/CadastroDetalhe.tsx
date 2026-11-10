@@ -22,6 +22,7 @@ export default function CadastroDetalhe() {
   const [verDocs, setVerDocs] = useState(false)
   const [refazer, setRefazer] = useState(false)
   const [acaoInic, setAcaoInic] = useState<D | null>(null)
+  const [transferir, setTransferir] = useState(false)
   const [iaRodando, setIaRodando] = useState<number | null>(null) // hooks sempre antes do "if (!d) return" (React #310)
   const carregar = () => api('GET', '/cadastros/' + id).then(setD)
   useEffect(() => { carregar() }, [id])
@@ -40,6 +41,11 @@ export default function CadastroDetalhe() {
     setIaRodando(docId)
     try { await api('POST', `/documentos/${docId}/ia`); toast('IA leu o documento'); carregar() }
     catch (e) { toast((e as Error).message, 'error') } finally { setIaRodando(null) }
+  }
+  const passar = async (corpo: { userId?: number; pendenciaId?: number }, nome: string, motivo?: string) => {
+    if (!corpo.userId && !window.confirm('Passar o cadastro para ' + nome + '? Documentos, SPC e histórico continuam no mesmo cadastro.')) return
+    try { await api('POST', `/cadastros/${c.id}/transferir`, { ...corpo, motivo }); toast('Cadastro passado para ' + nome); setTransferir(false); carregar() }
+    catch (er) { toast((er as Error).message, 'error') }
   }
   const resolver = async (pid: number) => { await api('POST', `/pendencias/${pid}/resolver`); toast('Pendência resolvida'); carregar() }
 
@@ -156,7 +162,10 @@ export default function CadastroDetalhe() {
                     {nomeResp(p.responsavelId) || 'sem responsável'}{p.prazo ? ' · prazo ' + dataBR(p.prazo) : ''}{p.resolvidaEm ? ` · resolvida por ${p.resolvidaPor} em ${dataHoraBR(p.resolvidaEm)}` : ''}
                   </div>
                 </div>
-                {!p.resolvidaEm && <button style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => resolver(p.id)}><Check size={14} /> Resolver</button>}
+                {!p.resolvidaEm && d.podeTransferir && d.abordagens.find((a: D) => a.pendenciaId === p.id) && (
+                  <button style={btn('soft', { minHeight: 30, padding: '0 10px' })} title="Passa o cadastro pra ela; documentos e SPC continuam no mesmo cadastro"
+                    onClick={() => passar({ pendenciaId: p.id }, d.abordagens.find((a: D) => a.pendenciaId === p.id).consultoraNome)}>Passar p/ {d.abordagens.find((a: D) => a.pendenciaId === p.id).consultoraNome}</button>)}
+                {!p.resolvidaEm && <button style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => resolver(p.id)}><Check size={14} /> {p.alerta?.startsWith('abordagem:') ? 'Manter com ' + (c.consultoraNome || 'a atual') : 'Resolver'}</button>}
               </div>
             ))}
           </Card>
@@ -181,7 +190,7 @@ export default function CadastroDetalhe() {
             <Field label="Endereço" value={e.rua ? `${e.rua}, ${e.numero}${e.complemento ? ' ' + e.complemento : ''} — ${e.bairro}, ${e.cidade}/${e.uf} · CEP ${String(e.cep).replace(/(\d{5})(\d{3})/, '$1-$2')}` : '—'} empty={!e.rua} />
             <Field label="Declarou restrição" value={c.declarouRestricao == null ? '—' : c.declarouRestricao ? 'Sim' : 'Não'} />
             <Field label="Início" value={c.modalidade === 'online' ? 'Online (envio)' : c.modalidade === 'presencial' ? 'Presencial (matriz)' : '—'} />
-            <Field label="Consultora" value={c.consultoraNome || '—'} empty={!c.consultoraNome} />
+            <Field label="Atendente" value={<span>{c.consultoraNome || '—'}{d.podeTransferir && <button onClick={() => setTransferir(true)} style={{ marginLeft: 8, border: 'none', background: 'none', padding: 0, color: 'var(--terra)', textDecoration: 'underline', cursor: 'pointer', fontSize: 13 }}>transferir</button>}</span>} empty={!c.consultoraNome} />
             <Field label="Origem" value={[c.origem, c.campanha].filter(Boolean).join(' · ') || '—'} empty={!c.origem} />
             {c.cidade && <Field label="Cidade (quiz)" value={c.cidade} />}
           </Card>
@@ -222,6 +231,7 @@ export default function CadastroDetalhe() {
       {conferir && <Conferir doc={conferir} onClose={() => setConferir(null)} onOk={carregar} />}
       {novaPend && <NovaPendencia c={c} equipe={d.equipe} onClose={() => setNovaPend(false)} onOk={carregar} />}
       {desistir && <Desistencia c={c} onClose={() => setDesistir(false)} onOk={carregar} />}
+      {transferir && <Transferir equipe={d.equipe} atual={c.consultoraNome} onClose={() => setTransferir(false)} onOk={(id, nome, motivo) => passar({ userId: id }, nome, motivo)} />}
       {verDocs && d.formalizacao && <VerDocumentos f={d.formalizacao} onClose={() => setVerDocs(false)} />}
       {refazer && <Refazer c={c} valor={d.formalizacao?.valor} onClose={() => setRefazer(false)} onOk={carregar} />}
       {acaoInic && <AcaoInic c={c} acao={acaoInic} onClose={() => setAcaoInic(null)} onOk={carregar} />}
@@ -445,4 +455,24 @@ function JueriCard({ c, onAtualizado }: { c: D; onAtualizado: () => void }) {
         <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '8px 0 0' }}>Atualizado {dataHoraBR(j.atualizadoEm)}. Faturamento = o que ela vendeu de fato (valor depois da baixa em cada acerto). O valor das maletas não é venda.</p>
       </>}
     </Card>)
+}
+
+// Item 4.2 do relatório de ajustes: a gerência passa o cadastro pra outra atendente (mesmo cadastro, mesmos documentos e SPC)
+function Transferir({ equipe, atual, onClose, onOk }: { equipe: D[]; atual?: string | null; onClose: () => void; onOk: (id: number, nome: string, motivo: string) => void }) {
+  const [id, setId] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const pessoas = equipe.filter(p => p.role !== 'logistica' && p.name !== atual)
+  const escolhida = pessoas.find(p => String(p.id) === id)
+  return (
+    <Modal title="Transferir atendente" subtitle={`Hoje com ${atual || 'ninguém'}. Documentos, consulta ao SPC e histórico continuam no mesmo cadastro.`} onClose={onClose}
+      footer={<><button style={btn('ghost')} onClick={onClose}>Cancelar</button><button style={btn('primary')} disabled={!escolhida} onClick={() => escolhida && onOk(escolhida.id, escolhida.name, motivo)}>Transferir</button></>}>
+      <label style={labelStyle}>Passar para</label>
+      <select value={id} onChange={e => setId(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }}>
+        <option value="">Escolha…</option>
+        {pessoas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <label style={labelStyle}>Motivo (opcional)</label>
+      <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Ex.: a Bia não deu sequência; a Natália retomou o contato" style={inputStyle} />
+    </Modal>
+  )
 }

@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { cadastros, quizRespostas, quizzes } from '../db/schema.js';
+import { cadastros, quizCliques, quizRespostas, quizzes } from '../db/schema.js';
+import { colaboradoraPorCodigo, proximaDoRodizio } from '../lib/distribuicao.js';
+import { registrarEvento } from '../lib/eventos.js';
 import { exigir, PODE, requireAuth } from '../lib/auth.js';
 import { criarCadastro } from '../lib/cadastros.js';
 import { QUIZ_PADRAO, avaliar, completar, linkWhatsapp, quizPorSlug, quizPublico, slugLivre, slugify, type Quiz } from '../lib/quiz.js';
@@ -44,6 +46,28 @@ const envio = z.object({
   nome: z.string().trim().min(3), telefone: z.string(), cidade: z.string().trim().max(120).optional(),
   respostas: z.record(z.string().max(600)), aceite: z.literal(true),
   origem: z.string().max(80).optional(), campanha: z.string().max(160).optional(),
+  colaboradora: z.string().max(40).optional(), // ?c= do link pessoal
+});
+
+// Visita ao link (o quiz chama 1 vez por sessão do navegador) — base do "quantas pessoas clicaram".
+const cliques = new Map<string, number[]>();
+quizRouter.post(['/api/quiz-clique', '/api/quiz-clique/:slug'], async (req, res) => {
+  const ip = String(req.ip || '');
+  const agora = Date.now();
+  const lista = (cliques.get(ip) || []).filter(t => agora - t < 3600_000);
+  if (lista.length >= 60) return res.json({ ok: true }); // robô: não conta
+  lista.push(agora); cliques.set(ip, lista); if (cliques.size > 5000) cliques.clear();
+  const qz = await quizPorSlug(req.params.slug);
+  if (!qz) return res.status(404).json({ error: 'Quiz não encontrado' });
+  const b = req.body || {};
+  const colab = await colaboradoraPorCodigo(b.colaboradora);
+  const sessao = String(b.sessao || '').slice(0, 40) || null;
+  if (sessao) {
+    const [ja] = await db.select({ id: quizCliques.id }).from(quizCliques).where(and(eq(quizCliques.sessao, sessao), eq(quizCliques.quizId, qz.id))).limit(1);
+    if (ja) return res.json({ ok: true });
+  }
+  await db.insert(quizCliques).values({ quizId: qz.id, origem: String(b.origem || '').slice(0, 80) || null, campanha: String(b.campanha || '').slice(0, 160) || null, colaboradoraId: colab?.id ?? null, sessao });
+  res.json({ ok: true });
 });
 
 quizRouter.post(['/api/quiz-publico', '/api/quiz-publico/:slug'], async (req, res) => {
@@ -62,21 +86,30 @@ quizRouter.post(['/api/quiz-publico', '/api/quiz-publico/:slug'], async (req, re
 
   const r = avaliar(q, d.respostas);
   if (r.faltando.length) return res.status(400).json({ error: 'Faltou responder: ' + r.faltando[0] });
-  const origem = d.origem || qz.nome; // sem ?origem= no link, a origem é o próprio quiz
+  // link pessoal (?c=) = prospecção ativa daquela colaboradora; sem ?origem= no link, a origem é o próprio quiz
+  const colab = await colaboradoraPorCodigo(d.colaboradora);
+  const origem = d.origem || (colab ? 'Prospecção ativa' : qz.nome);
 
   const [salva] = await db.insert(quizRespostas).values({
     nome: d.nome, telefone, cidade: d.cidade || null, respostas: d.respostas, itens: r.itens, pontos: r.pontos, aprovado: r.aprovado,
-    eliminatorias: r.eliminatorias, origem, campanha: d.campanha || null, ip, quizId: qz.id, quizNome: qz.nome,
+    eliminatorias: r.eliminatorias, origem, campanha: d.campanha || null, ip, quizId: qz.id, quizNome: qz.nome, colaboradoraId: colab?.id ?? null,
   }).returning();
 
   if (r.aprovado) {
     // já tem cadastro em andamento com esse WhatsApp? não duplica — só liga a resposta a ele
     const [aberto] = await db.select().from(cadastros)
       .where(and(inArray(cadastros.telefone, variantes(telefone)), notInArray(cadastros.status, FINAIS))).limit(1);
+    // dona: quem mandou o link pessoal; senão o rodízio do tráfego (se estiver ligado)
+    const rod = aberto || colab ? null : await proximaDoRodizio(d.campanha);
+    const dona = colab || rod?.user || null;
     const cad = aberto || await criarCadastro({
       nome: d.nome, telefone, cidade: d.cidade, origem, campanha: d.campanha, doQuiz: true,
+      consultoraNome: dona?.name, consultoraEmail: dona?.email,
       quiz: { respostaId: salva.id, pontos: r.pontos, quizId: qz.id, quizNome: qz.nome, itens: r.itens },
     }, 'cliente (quiz)');
+    if (!aberto && dona) await registrarEvento(cad.id, 'consultora_definida',
+      colab ? `Atendente: ${dona.name} (link pessoal dela — prospecção ativa)` : `Atendente: ${dona.name} (rodízio do tráfego, lista ${rod!.lista})`,
+      'sistema', { consultoraNome: dona.name, consultoraEmail: dona.email, via: colab ? 'link_pessoal' : 'rodizio', lista: rod?.lista ?? null });
     await db.update(quizRespostas).set({ cadastroId: cad.id }).where(eq(quizRespostas.id, salva.id));
   }
 

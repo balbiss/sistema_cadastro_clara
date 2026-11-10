@@ -39,6 +39,7 @@ export const PODE = {
   relatorios: (u: User) => ['diretoria', 'analise', 'administrativo'].includes(u.role),
   abrirCadastro: (u: User) => u.role !== 'logistica',
   configurar: (u: User) => u.role === 'diretoria',
+  transferir: (u: User) => u.role === 'diretoria', // gerência decide quem fica com o cadastro
 };
 export const exigir = (regra: (u: User) => boolean, msg: string) => (req: Request, res: Response, next: NextFunction) =>
   req.user && regra(req.user) ? next() : res.status(403).json({ error: msg });

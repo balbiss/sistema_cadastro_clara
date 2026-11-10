@@ -148,8 +148,46 @@ cadastrosRouter.get('/api/cadastros/:id', async (req, res) => {
     eventos: limitado ? evs.filter(e => !['spc_consultado', 'spc_nao_consultado', 'spc_reaproveitado'].includes(e.tipo)) : evs,
     documentos: docs.map(d => ({ ...d, nome: DOC_NOME[d.tipo] || d.tipo, ...(limitado ? { arquivo: null, ia: null } : {}) })),
     situacaoDocs: { situacao: sd.situacao, faltam: sd.faltam, itens: sd.itens.map(i => ({ tipo: i.tipo, nome: i.nome, docId: i.doc?.id ?? null, status: i.doc?.status ?? 'faltando' })) },
-    podeDecidir: PODE.decidir(req.user!), podeConferir: PODE.conferir(req.user!), limitado,
+    podeDecidir: PODE.decidir(req.user!), podeConferir: PODE.conferir(req.user!), podeTransferir: PODE.transferir(req.user!), limitado,
+    // pendências "outra atendente também está atendendo": pra quem a gerência pode passar o cadastro
+    abordagens: pends.filter(p => p.alerta?.startsWith('abordagem:') && !p.resolvidaEm).map(p => ({ pendenciaId: p.id, ...novaDona(evs, p.alerta!) })),
   });
+});
+
+// ---------- transferência de atendente (item 4.2: só a gerência decide) ----------
+type Dona = { consultoraNome: string | null; consultoraEmail: string | null; crmUserId: string | null };
+/** A atendente que pediu o formulário (evento nova_abordagem) ligada à pendência 'abordagem:<email ou nome>'. */
+function novaDona(evs: (typeof eventos.$inferSelect)[], alerta: string): Dona {
+  const chave = alerta.slice('abordagem:'.length);
+  const ev = evs.find(e => e.tipo === 'nova_abordagem' && (((e.dados as any)?.nova?.consultoraEmail || (e.dados as any)?.nova?.consultoraNome) === chave));
+  const n = (ev?.dados as any)?.nova || {};
+  return { consultoraNome: n.consultoraNome || chave, consultoraEmail: n.consultoraEmail || null, crmUserId: n.crmUserId || null };
+}
+cadastrosRouter.post('/api/cadastros/:id/transferir', exigir(PODE.transferir, 'Só a gerência (diretoria) transfere o cadastro'), async (req, res) => {
+  const p = z.object({ userId: z.number().int().optional(), pendenciaId: z.number().int().optional(), motivo: z.string().max(300).optional() }).safeParse(req.body);
+  if (!p.success || (!p.data.userId && !p.data.pendenciaId)) return res.status(400).json({ error: 'Escolha pra quem passar o cadastro' });
+  const c = await carregar(Number(req.params.id));
+  if (!c) return naoAchou(res);
+  let dona: Dona;
+  if (p.data.userId) {
+    const [u] = await db.select().from(users).where(and(eq(users.id, p.data.userId), eq(users.active, true))).limit(1);
+    if (!u) return res.status(404).json({ error: 'Pessoa não encontrada (ou inativa)' });
+    dona = { consultoraNome: u.name, consultoraEmail: u.email.toLowerCase(), crmUserId: null };
+  } else {
+    const [pend] = await db.select().from(pendencias).where(and(eq(pendencias.id, p.data.pendenciaId!), eq(pendencias.cadastroId, c.id))).limit(1);
+    if (!pend?.alerta?.startsWith('abordagem:')) return res.status(404).json({ error: 'Pendência não encontrada' });
+    dona = novaDona(await db.select().from(eventos).where(eq(eventos.cadastroId, c.id)).orderBy(desc(eventos.id)), pend.alerta);
+  }
+  const mesma = (dona.consultoraEmail && dona.consultoraEmail === c.consultoraEmail) || (!dona.consultoraEmail && dona.consultoraNome === c.consultoraNome);
+  if (mesma) return res.status(409).json({ error: 'O cadastro já é dessa pessoa' });
+  await db.update(cadastros).set({ ...dona, updatedAt: new Date() }).where(eq(cadastros.id, c.id));
+  // documentos, SPC e histórico continuam no MESMO cadastro (são da cliente/CPF, não da atendente)
+  await registrarEvento(c.id, 'transferencia', `Cadastro passado de ${c.consultoraNome || 'ninguém'} para ${dona.consultoraNome} — autorizado por ${quem(req)}${p.data.motivo ? ': ' + p.data.motivo : ''}`, quem(req),
+    { de: { nome: c.consultoraNome, email: c.consultoraEmail, crm_user_id: c.crmUserId }, para: dona, motivo: p.data.motivo || null });
+  // a gerência decidiu: as pendências "outra atendente também está atendendo" fecham
+  await db.update(pendencias).set({ resolvidaEm: new Date(), resolvidaPor: quem(req) })
+    .where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm), ilike(pendencias.alerta, 'abordagem:%')));
+  res.json({ ok: true, consultora: dona.consultoraNome });
 });
 
 // ---------- decisão manual (análise humana / contestação) ----------

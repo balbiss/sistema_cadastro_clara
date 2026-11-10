@@ -43,6 +43,16 @@ export default function Quiz() {
   const { slug } = useParams()
   const caminho = '/quiz-publico' + (slug ? '/' + encodeURIComponent(slug) : '')
   useEffect(() => { api<QuizPub>('GET', caminho).then(setQ).catch(e => setErro(e.message)) }, [caminho])
+  // conta a visita (1 por sessão do navegador) — relatório "cliques x Meta"; prévia da equipe não conta
+  useEffect(() => {
+    if (previa) return
+    let sessao = ''
+    try { sessao = sessionStorage.getItem('quiz_sessao') || ''; if (!sessao) { sessao = Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem('quiz_sessao', sessao) } } catch { /* navegador sem storage */ }
+    api('POST', '/quiz-clique' + (slug ? '/' + encodeURIComponent(slug) : ''), {
+      sessao: sessao || undefined, colaboradora: params.get('c') || undefined,
+      origem: params.get('origem') || params.get('utm_source') || undefined, campanha: params.get('utm_campaign') || params.get('campanha') || undefined,
+    }).catch(() => {})
+  }, [caminho]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { window.scrollTo(0, 0) }, [tela, atual])
 
   const ap = { ...AP_PADRAO, ...(q?.aparencia || {}) }
@@ -87,6 +97,7 @@ export default function Quiz() {
       const r = await api<Resultado>('POST', caminho, {
         nome: contato.nome, telefone: contato.telefone, cidade: contato.cidade || undefined, respostas: resp, aceite: true,
         origem: params.get('origem') || params.get('utm_source') || undefined, campanha: params.get('utm_campaign') || params.get('campanha') || undefined,
+        colaboradora: params.get('c') || undefined,
       })
       await new Promise(ok => setTimeout(ok, Math.max(0, 2800 - (Date.now() - inicio))))
       setRes(r); setTela('resultado')

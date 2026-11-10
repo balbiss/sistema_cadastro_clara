@@ -136,6 +136,73 @@ t('sem atendente: sem dona', semDona.http === 201 && !semDona.consultora);
 const pega = await novo('SD-' + sufixo, 'Lead do Trafego', '11144477735', { consultora: 'Bia', consultora_email: 'bia@teste.local', crm_user_id: 9 });
 t('1ª atendente que manda fica com o cadastro', pega.consultora === 'Bia' && !pega.aviso);
 
+// ---------- 4) Transferência pela gerência ----------
+const dNat = await dossie(nat.id);
+const ab = dNat.abordagens?.[0];
+t('dossiê mostra pra quem passar (Bia)', ab?.consultoraNome === 'Bia', JSON.stringify(dNat.abordagens));
+t('consultora não transfere', (await req('POST', `/api/cadastros/${nat.id}/transferir`, { token: tokNat, body: { pendenciaId: ab.pendenciaId } })).status === 403);
+const tr = await req('POST', `/api/cadastros/${nat.id}/transferir`, { token: dir, body: { pendenciaId: ab.pendenciaId, motivo: 'Natália não deu sequência' } });
+t('gerência passa o cadastro pra Bia', tr.status === 200 && tr.json.consultora === 'Bia', tr.json);
+let dT = await dossie(nat.id);
+t('dona agora é a Bia (e-mail dela)', dT.cadastro.consultoraNome === 'Bia' && dT.cadastro.consultoraEmail === 'bia@teste.local');
+t('pendência da gerência fechou', !dT.pendencias.some(p => p.alerta?.startsWith('abordagem:') && !p.resolvidaEm));
+t('histórico registra de quem pra quem e quem autorizou', dT.eventos.some(e => e.tipo === 'transferencia' && e.descricao.includes('Natália') && e.descricao.includes('Bia')));
+t('Bia passa a ver; Natália não', (await req('GET', '/api/cadastros', { token: tokBia })).json.some(c => c.id === nat.id) && !(await req('GET', '/api/cadastros', { token: tokNat })).json.some(c => c.id === nat.id));
+t('passar pra mesma pessoa é recusado', (await req('POST', `/api/cadastros/${nat.id}/transferir`, { token: dir, body: { userId: (await req('GET', '/api/usuarios', { token: dir })).json.find(u => u.email === 'bia@teste.local').id } })).status === 409);
+const devolve = await req('POST', `/api/cadastros/${nat.id}/transferir`, { token: dir, body: { userId: (await req('GET', '/api/usuarios', { token: dir })).json.find(u => u.email === 'natalia@teste.local').id } });
+t('transferir escolhendo a pessoa', devolve.status === 200 && devolve.json.consultora === 'Natália Souza');
+
+// ---------- 5) Link pessoal, rodízio e cliques ----------
+const quizzes = (await req('GET', '/api/quizzes', { token: dir })).json;
+const principal = quizzes.find(q => q.padrao);
+const cfgQ = (await req('GET', '/api/quizzes/' + principal.id, { token: dir })).json;
+await req('PUT', '/api/quizzes/' + principal.id, { token: dir, body: { nome: cfgQ.nome, slug: cfgQ.slug, quiz: { ...cfgQ.quiz, ativo: true, whatsapp: '', notaCorte: 13 } } });
+const boa = { motivo: 'renda_extra', meta: '1000a3000', idade: '25a34', filhos: 'nao', apoio: 'total', casa: 'propria', trabalho: 'clt', atividade: 'Vendedora há 3 anos', vende: 'frequencia', semijoias: 'sucesso', instagram: 'ativo', negativado: 'limpo', regras: 'sim' };
+let nTel = 0;
+const responder = (nome, extra = {}) => req('POST', '/api/quiz-publico', { body: { nome, telefone: '1497' + sufixo.slice(-3) + String(++nTel).padStart(4, '0'), cidade: 'Bauru/SP', respostas: boa, aceite: true, ...extra } });
+const cadDoQuiz = async nome => (await req('GET', '/api/cadastros?q=' + encodeURIComponent(nome), { token: dir })).json[0];
+
+const dist = (await req('GET', '/api/distribuicao', { token: dir })).json;
+const codNat = dist.links.find(l => l.email === 'natalia@teste.local')?.codigo;
+t('cada pessoa tem código do link pessoal', !!codNat && dist.links.every(l => l.codigo));
+t('consultora só vê o próprio link', (await req('GET', '/api/distribuicao', { token: tokNat })).json.links.length === 1);
+t('link do quiz vem pronto', dist.quizzes.some(q => q.padrao && q.link.endsWith('/quiz')));
+
+let rq = await responder('Prospectada Link ' + sufixo, { colaboradora: codNat });
+t('quiz pelo link pessoal aprova', rq.json.aprovado === true, rq.json);
+let cq = await cadDoQuiz('Prospectada Link ' + sufixo);
+t('cadastro do link pessoal fica com a Natália (prospecção ativa)', cq?.consultora === 'Natália Souza' && cq.origem === 'Prospecção ativa', JSON.stringify(cq));
+
+// rodízio: Bia e Natália no geral; campanha "bf" só Bia
+const usuarios = (await req('GET', '/api/usuarios', { token: dir })).json;
+const idBia = usuarios.find(u => u.email === 'bia@teste.local').id, idNat = usuarios.find(u => u.email === 'natalia@teste.local').id;
+t('rodízio ligado sem ninguém é recusado', (await req('PUT', '/api/distribuicao/rodizio', { token: dir, body: { ativo: true, participantes: [], campanhas: [] } })).status === 400);
+t('consultora não mexe no rodízio', (await req('PUT', '/api/distribuicao/rodizio', { token: tokNat, body: { ativo: true, participantes: [idNat], campanhas: [] } })).status === 403);
+t('salva rodízio', (await req('PUT', '/api/distribuicao/rodizio', { token: dir, body: { ativo: true, participantes: [idBia, idNat], campanhas: [{ campanha: 'BF', participantes: [idBia] }] } })).status === 200);
+const donas = [];
+for (const i of [1, 2, 3]) { await responder(`Trafego ${i} ${sufixo}`, { campanha: 'outubro' }); donas.push((await cadDoQuiz(`Trafego ${i} ${sufixo}`))?.consultora); }
+t('rodízio geral alterna (Bia, Natália, Bia)', donas.join(',') === 'Bia Lima,Natália Souza,Bia Lima', donas.join(','));
+await responder('Trafego BF ' + sufixo, { campanha: 'bf' });
+t('campanha com lista própria (BF → só Bia, sem diferenciar maiúscula)', (await cadDoQuiz('Trafego BF ' + sufixo))?.consultora === 'Bia Lima');
+const cT = await cadDoQuiz('Trafego 1 ' + sufixo);
+t('histórico diz que veio do rodízio', (await dossie(cT.id)).eventos.some(e => e.tipo === 'consultora_definida' && e.descricao.includes('rodízio')));
+await req('PUT', '/api/distribuicao/rodizio', { token: dir, body: { ativo: false, participantes: [idBia, idNat], campanhas: [] } });
+await responder('Trafego Off ' + sufixo, { campanha: 'outubro' });
+t('rodízio desligado: fica sem atendente', !(await cadDoQuiz('Trafego Off ' + sufixo))?.consultora);
+
+// cliques
+for (const s of ['s1', 's2', 's2']) await req('POST', '/api/quiz-clique', { body: { sessao: s + sufixo, campanha: 'outubro' } });
+await req('POST', '/api/quiz-clique', { body: { sessao: 'p1' + sufixo, colaboradora: codNat } });
+const hoje = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+const traf = (await req('GET', `/api/distribuicao/trafego?de=${hoje}&ate=${hoje}`, { token: dir })).json;
+const out = traf.campanhas?.find(c => c.campanha === 'outubro');
+t('cliques contados 1 por sessão', out?.cliques === 2, JSON.stringify(traf.campanhas));
+t('respostas/aprovadas/cadastros por campanha', out?.respostas === 4 && out.aprovadas === 4 && out.cadastros === 4, JSON.stringify(out));
+const pNat = traf.colaboradoras?.find(c => c.id === idNat);
+t('resultado por link pessoal', pNat?.cliques === 1 && pNat.respostas === 1, JSON.stringify(traf.colaboradoras));
+t('consultora não vê relatório de tráfego', (await req('GET', '/api/distribuicao/trafego', { token: tokNat })).status === 403);
+t('data inválida recusada', (await req('GET', "/api/distribuicao/trafego?de=2026-01-01';drop", { token: dir })).status === 400);
+
 // aviso de webhook leva a atendente
 await espera(800);
 const rec = (await req('GET', '/api/crm-teste/recebidos', { token: dir })).json;
