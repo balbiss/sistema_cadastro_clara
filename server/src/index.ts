@@ -17,6 +17,7 @@ import { consultasRouter } from './routes/consultas.js';
 import { distribuicaoRouter } from './routes/distribuicao.js';
 import { iniciarJueri } from './lib/jueri.js';
 import { avalistasRouter } from './routes/avalistas.js';
+import { carteiraRouter } from './routes/carteira.js';
 import { migrarAvalistasLegados } from './lib/avalistas.js';
 import { carregarDocsConfig } from './lib/settings.js';
 
@@ -34,6 +35,7 @@ app.use(operacaoRouter);
 app.use(consultasRouter);
 app.use(distribuicaoRouter);
 app.use(avalistasRouter);
+app.use(carteiraRouter);
 app.use(publicoRouter);
 app.use(configRouter);
 app.use(cadastrosRouter);

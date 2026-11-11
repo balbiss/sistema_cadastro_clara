@@ -56,3 +56,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--t
 @media (max-width: 760px) { .kanban { grid-template-columns: 1fr !important; } }
 /* página de assinatura: imprimir só o contrato e a promissória */
 @media print { .nao-imprimir { display: none !important; } body { background: #fff !important; } }
+
+/* Minha carteira: corrida + ranking lado a lado no computador, um embaixo do outro no celular */
+.grid-carteira { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 900px) { .grid-carteira { grid-template-columns: 1fr; } }

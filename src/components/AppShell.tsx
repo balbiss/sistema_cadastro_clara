@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ClipboardCheck, FileSignature, Home, ListChecks, LogOut, Menu, PackageCheck, PanelLeft, PlugZap, SlidersHorizontal, Users, X, Sparkles, BarChart3, Network, SearchCheck, Shuffle, UserCheck } from 'lucide-react'
+import { ClipboardCheck, FileSignature, Home, ListChecks, LogOut, Menu, PackageCheck, PanelLeft, PlugZap, SlidersHorizontal, Users, X, Sparkles, BarChart3, Network, SearchCheck, Shuffle, UserCheck, Trophy } from 'lucide-react'
 import { api, usuarioAtual } from '../lib/api'
 import { CARGO } from '../lib/status'
 import { ClaraLogo } from './extra'
@@ -12,6 +12,7 @@ type Item = { path: string; label: string; icon: typeof Home; badge?: 'pendencia
 const EQUIPE_CADASTRO = ['diretoria', 'analise', 'administrativo']
 const NAV: Item[] = [
   { path: '/', label: 'Painel', icon: Home, cargos: [...EQUIPE_CADASTRO, 'consultora'] },
+  { path: '/carteira', label: 'Minha carteira', icon: Trophy, cargos: [...EQUIPE_CADASTRO, 'consultora'] },
   { path: '/quiz-perfil', label: 'Quizzes de perfil', icon: Sparkles, cargos: EQUIPE_CADASTRO },
   { path: '/links', label: 'Links e rodízio', icon: Shuffle, cargos: [...EQUIPE_CADASTRO, 'consultora'] },
   { path: '/cadastros', label: 'Cadastros', icon: ClipboardCheck, badge: 'analise', cargos: [...EQUIPE_CADASTRO, 'consultora'] },
