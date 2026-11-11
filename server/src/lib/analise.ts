@@ -6,6 +6,7 @@ import { getRegras, type Regras } from './settings.js';
 import { mudarStatus, registrarEvento } from './eventos.js';
 import { acaoParaStatus, gravidade, statusNome, type Acao, type Status } from './status.js';
 import { brl, cpfValido, idade, normalizaNome, soDigitos } from './util.js';
+import { analisarAvalista, avalistaDoFormulario, avalistaVigente, decidirAvalista, listarAvalistas, tentativas } from './avalistas.js';
 
 type Cadastro = typeof cadastros.$inferSelect;
 type Disparo = { acao: Acao; motivo: string };
@@ -20,9 +21,9 @@ export async function analisar(c: Cadastro, autor = 'automático') {
     checagens.push({ regra, ok, detalhe });
     if (!ok && acao) disparos.push({ acao, motivo: detalhe });
   };
-  const decidir = async (status: Status, motivo: string) => {
-    const novo = await mudarStatus(c, status, motivo, autor, { checagens, decididoPor: 'automático', decididoEm: new Date() });
-    if (status === 'pendente_avalista') await abrirPendencia(c.id, 'Conseguir avalista com a cliente', autor);
+  const decidir = async (status: Status, motivo: string, extra: Partial<Cadastro> = {}) => {
+    const novo = await mudarStatus(c, status, motivo, autor, { checagens, decididoPor: 'automático', decididoEm: new Date(), ...extra });
+    if (status === 'pendente_avalista') await abrirPendencia(c.id, (await listarAvalistas(c.id)).length ? 'Conseguir outro avalista com a cliente' : 'Conseguir avalista com a cliente', autor);
     if (status === 'analise_humana') await abrirPendencia(c.id, 'Analisar cadastro: ' + motivo, autor);
     return novo;
   };
@@ -56,12 +57,15 @@ export async function analisar(c: Cadastro, autor = 'automático') {
   // ---- consulta do titular ----
   const spc = await consultar(c, 'titular', cpf, c.nome, autor);
   avaliarSpc(spc, c.nome, regras, check, 'Titular');
+  if (regras.scoreMinimo > 0 && spc.score != null)
+    check('Score de crédito', spc.score >= regras.scoreMinimo, `Score ${spc.score} (mínimo ${regras.scoreMinimo})`, regras.acaoScoreBaixo);
   if (disparos.length) { const p = pior(); return decidir(acaoParaStatus(p.acao), p.motivo); }
 
   const total = spc.totalNegativado;
   if (total <= regras.limiteSemAvalista) {
     check('Limite sem avalista', true, total ? `Restrições de ${brl(total)} — dentro do limite de ${brl(regras.limiteSemAvalista)}` : 'Nada consta');
-    return decidir('aprovado', total ? `Restrições de ${brl(total)}, dentro do limite` : 'Nada consta no SPC');
+    // não precisa de avalista: nenhum é exigido (nem documentos nem assinatura dele)
+    return decidir('aprovado', total ? `Restrições de ${brl(total)}, dentro do limite` : 'Nada consta no SPC', { avalistaId: null });
   }
   if (total > regras.limiteComAvalista) {
     check('Limite com avalista', false, `Restrições de ${brl(total)} — acima de ${brl(regras.limiteComAvalista)}`);
@@ -69,23 +73,38 @@ export async function analisar(c: Cadastro, autor = 'automático') {
   }
   check('Precisa de avalista', false, `Restrições de ${brl(total)} — exige avalista (entre ${brl(regras.limiteSemAvalista)} e ${brl(regras.limiteComAvalista)})`);
 
-  // ---- avalista ----
-  const av = c.avalista || {};
-  const avCpf = soDigitos(av.cpf);
-  if (!c.temAvalista || !avCpf) return decidir('pendente_avalista', `Restrições de ${brl(total)} — precisa de avalista`);
-  check('CPF do avalista válido', cpfValido(avCpf) && avCpf !== cpf, avCpf === cpf ? 'Avalista com o mesmo CPF da titular' : cpfValido(avCpf) ? 'CPF válido' : 'CPF do avalista inválido', 'analise_humana');
-  const avAnos = idade(av.dataNascimento);
-  check('Idade do avalista', avAnos !== null && avAnos >= 18, avAnos === null ? 'Nascimento do avalista não informado' : `Avalista com ${avAnos} anos`, 'analise_humana');
-  if (disparos.length) { const p = pior(); return decidir(acaoParaStatus(p.acao), p.motivo); }
+  // ---- avalista (módulo de avalistas: até N tentativas, cada uma registrada) ----
+  const av = (await avalistaVigente(c.id)) || (await avalistaDoFormulario(c, autor));
+  if (!av) return decidir('pendente_avalista', `Restrições de ${brl(total)} — precisa de avalista`, { avalistaId: null });
+  const r = await analisarAvalista(c, av, (avCpf, nome) => consultar(c, 'avalista', avCpf, nome, autor));
+  checagens.push(...r.checagens);
+  if (r.resultado === 'aprovado') {
+    await decidirAvalista(c, av, 'aprovado', r.motivo, 'automático', r.checagens);
+    const [atual] = await db.select().from(cadastros).where(eq(cadastros.id, c.id));
+    c = atual;
+    return decidir('aprovado_avalista', `Restrições de ${brl(total)} da titular — ${av.ordem}º avalista (${av.nome}) aprovado`);
+  }
+  if (r.resultado === 'humano') {
+    await decidirAvalista(c, av, 'em_analise', r.motivo, 'automático', r.checagens);
+    return decidir('analise_humana', `${av.ordem}º avalista: ${r.motivo}`);
+  }
+  c = await decidirAvalista(c, av, 'reprovado', r.motivo, 'automático', r.checagens);
+  return depoisDeAvalistaReprovado(c, av.ordem, av.nome, r.motivo, autor, checagens);
+}
 
-  const spcAv = await consultar(c, 'avalista', avCpf, av.nome || '', autor);
-  const limpo = spcAv.situacao === 'nada_consta';
-  check('Avalista sem restrições', limpo, limpo ? 'Nada consta para o avalista' : `Avalista com restrições (${brl(spcAv.totalNegativado)}${spcAv.protestos.length ? ', protesto' : ''})`,
-    regras.acaoAvalistaComRestricao);
-  if (normalizaNome(spcAv.nomeConsultado) !== normalizaNome(av.nome))
-    check('Nome do avalista confere', false, `Nome no SPC (“${spcAv.nomeConsultado}”) diferente do informado`, regras.acaoNomeDivergente);
-  if (disparos.length) { const p = pior(); return decidir(acaoParaStatus(p.acao), p.motivo); }
-  return decidir('aprovado_avalista', `Restrições de ${brl(total)} da titular, avalista aprovado`);
+/** Avalista não aprovado: se ainda há tentativa, volta a aguardar avalista; senão aplica a regra "esgotou". */
+export async function depoisDeAvalistaReprovado(c: Cadastro, ordem: number, nome: string, motivo: string, autor: string, checagens?: Checagem[]) {
+  const t = await tentativas(c.id);
+  const extra = { avalistaId: null, decididoPor: autor === 'automático' ? 'automático' : autor, decididoEm: new Date(), ...(checagens ? { checagens } : {}) };
+  if (t.podeOutro) {
+    const novo = await mudarStatus(c, 'pendente_avalista', `${ordem}º avalista (${nome}) não aprovado — ${motivo}. Pode apresentar outro (${t.usadas + 1}º de ${t.max})`, autor, extra);
+    await abrirPendencia(c.id, 'Conseguir outro avalista com a cliente', autor);
+    return novo;
+  }
+  const status = acaoParaStatus(t.acaoEsgotou);
+  const novo = await mudarStatus(c, status, `Nenhum avalista aprovado (${t.usadas} de ${t.max}). Último: ${motivo}`, autor, extra);
+  if (status === 'analise_humana') await abrirPendencia(c.id, 'Analisar cadastro: nenhum avalista aprovado', autor);
+  return novo;
 }
 
 function avaliarSpc(spc: ResultadoSpc, nome: string, r: Regras, check: (regra: string, ok: boolean, detalhe: string, acao?: Acao) => void, quem: string) {

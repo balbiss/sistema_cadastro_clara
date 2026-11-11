@@ -83,6 +83,8 @@ export const cadastros = pgTable('cadastros', {
   jueriId: text('jueri_id'),
   jueri: jsonb('jueri').$type<ResumoJueri>(),
   descartadoEm: timestamp('descartado_em', { withTimezone: true }),
+  // avalista que vale pro cadastro (o aprovado). Os outros que a cliente apresentou ficam na tabela avalistas.
+  avalistaId: integer('avalista_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -116,6 +118,8 @@ export const documentos = pgTable('documentos', {
   conferidoEm: timestamp('conferido_em', { withTimezone: true }),
   // leitura da IA (item 5): dados extraídos + divergências. Nunca aprova sozinha.
   ia: jsonb('ia').$type<IaDoc>(),
+  // documento do avalista: de QUAL avalista (pasta dele dentro do cadastro)
+  avalistaId: integer('avalista_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -178,6 +182,30 @@ export const assinaturas = pgTable('assinaturas', {
   assinadoEm: timestamp('assinado_em', { withTimezone: true }),
   ip: text('ip'),
   userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Avalistas apresentados pela candidata (relatório 2, item 3): até N por cadastro (Regras do avalista),
+// cada um com quiz próprio, análise e documentos. Os não aprovados ficam guardados (histórico).
+export type ResultadoQuizAvalista = { pontos: number; eliminatorias: string[]; faltando: string[]; itens: { pergunta: string; resposta: string; pontos: number }[] };
+export const avalistas = pgTable('avalistas', {
+  id: serial('id').primaryKey(),
+  cadastroId: integer('cadastro_id').notNull(),
+  ordem: integer('ordem').notNull(), // 1º, 2º…
+  nome: text('nome').notNull(),
+  cpf: text('cpf').notNull(),
+  telefone: text('telefone'),
+  dataNascimento: date('data_nascimento'),
+  endereco: jsonb('endereco').$type<Endereco>(),
+  parentesco: text('parentesco'),
+  respostas: jsonb('respostas').$type<Record<string, string>>(),
+  quiz: jsonb('quiz').$type<ResultadoQuizAvalista>(),
+  status: text('status').notNull().default('em_analise'), // em_analise | aprovado | reprovado | substituido
+  motivo: text('motivo'),
+  checagens: jsonb('checagens').$type<Checagem[]>(),
+  decididoPor: text('decidido_por'),
+  decididoEm: timestamp('decidido_em', { withTimezone: true }),
+  informadoPor: text('informado_por'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -317,4 +345,11 @@ CREATE TABLE IF NOT EXISTS formalizacoes (
 CREATE TABLE IF NOT EXISTS assinaturas (
   id serial PRIMARY KEY, formalizacao_id integer NOT NULL, cadastro_id integer NOT NULL, papel text NOT NULL, nome text NOT NULL,
   cpf text NOT NULL, token text NOT NULL UNIQUE, assinado_em timestamptz, ip text, user_agent text, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS avalistas (
+  id serial PRIMARY KEY, cadastro_id integer NOT NULL, ordem integer NOT NULL, nome text NOT NULL, cpf text NOT NULL, telefone text,
+  data_nascimento date, endereco jsonb, parentesco text, respostas jsonb, quiz jsonb, status text NOT NULL DEFAULT 'em_analise', motivo text,
+  checagens jsonb, decidido_por text, decidido_em timestamptz, informado_por text, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS avalistas_cadastro_idx ON avalistas (cadastro_id);
+ALTER TABLE cadastros ADD COLUMN IF NOT EXISTS avalista_id integer;
+ALTER TABLE documentos ADD COLUMN IF NOT EXISTS avalista_id integer;
 `;

@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { cadastros, consultasCredito, documentos, eventos, pendencias, users } from '../db/schema.js';
+import { avalistas, cadastros, consultasCredito, documentos, eventos, pendencias, users } from '../db/schema.js';
 import { exigir, PODE, requireAuth } from '../lib/auth.js';
 import { criarCadastro } from '../lib/cadastros.js';
 import { analisar, abrirPendencia } from '../lib/analise.js';
@@ -19,6 +19,9 @@ import { soDigitos } from '../lib/util.js';
 import { comFiltro, filtroCadastros, podeVer, restrito } from '../lib/escopo.js';
 import { sincronizarJueri } from '../lib/jueri.js';
 import { conferirComIa, fecharPendenciaIa, iaDisponivel } from '../lib/ia.js';
+import { avalistaVigente, decidirAvalista, nomeParentesco, STATUS_AVALISTA } from '../lib/avalistas.js';
+import { getRegrasAvalista } from '../lib/settings.js';
+import { ehDocAvalista } from '../lib/documentos.js';
 
 export const cadastrosRouter = Router();
 cadastrosRouter.use('/api/cadastros', requireAuth);
@@ -130,14 +133,17 @@ cadastrosRouter.get('/api/cadastros/:id', async (req, res) => {
   const c = await carregarVisivel(req, Number(req.params.id));
   if (!c) return naoAchou(res);
   const limitado = restrito(req.user!); // consultora/logística: sem SPC e sem arquivo de documento
-  const [consultas, docs, pends, evs, equipe] = await Promise.all([
+  const [consultas, docs, pends, evs, equipe, avs, ra] = await Promise.all([
     db.select().from(consultasCredito).where(eq(consultasCredito.cadastroId, c.id)).orderBy(desc(consultasCredito.id)),
     db.select().from(documentos).where(eq(documentos.cadastroId, c.id)).orderBy(desc(documentos.id)),
     db.select().from(pendencias).where(eq(pendencias.cadastroId, c.id)).orderBy(asc(pendencias.id)),
     db.select().from(eventos).where(eq(eventos.cadastroId, c.id)).orderBy(desc(eventos.id)),
     db.select({ id: users.id, name: users.name, role: users.role }).from(users).where(eq(users.active, true)),
+    db.select().from(avalistas).where(eq(avalistas.cadastroId, c.id)).orderBy(asc(avalistas.ordem)),
+    getRegrasAvalista(),
   ]);
   const sd = situacaoDocs(c, docs);
+  const docOut = (d: typeof docs[number]) => ({ ...d, nome: DOC_NOME[d.tipo] || d.tipo, ...(limitado ? { arquivo: null, ia: null } : {}) });
   const form = await formalizacaoAtual(c.id);
   res.json({
     formalizacao: form && { ...form, assinaturas: form.assinaturas.map(a => ({ ...a, link: linkAssinatura(a.token) })) },
@@ -146,7 +152,16 @@ cadastrosRouter.get('/api/cadastros/:id', async (req, res) => {
     cadastro: { ...c, checagens: limitado ? null : c.checagens, statusNome: statusNome(c.status), linkFormulario: linkFormulario(c), linkDossie: linkDossie(c) },
     consultas: limitado ? [] : consultas, pendencias: pends, equipe,
     eventos: limitado ? evs.filter(e => !['spc_consultado', 'spc_nao_consultado', 'spc_reaproveitado'].includes(e.tipo)) : evs,
-    documentos: docs.map(d => ({ ...d, nome: DOC_NOME[d.tipo] || d.tipo, ...(limitado ? { arquivo: null, ia: null } : {}) })),
+    documentos: docs.map(docOut),
+    // relatório 2, itens 3.4–3.9: pasta de cada avalista dentro do cadastro (o aprovado em destaque, os outros no histórico)
+    avalistas: avs.map(a => ({
+      ...a, statusNome: STATUS_AVALISTA[a.status] || a.status, parentescoNome: nomeParentesco(ra, a.parentesco), vigente: a.id === c.avalistaId,
+      checagens: limitado ? null : a.checagens, quiz: limitado ? null : a.quiz,
+      consultas: limitado ? [] : consultas.filter(q => q.pessoa === 'avalista' && q.cpf === a.cpf),
+      documentos: docs.filter(d => d.avalistaId === a.id).map(docOut),
+    })),
+    avalistaTentativas: { usadas: avs.length, max: ra.maxAvalistas },
+    pasta: `${c.nome}${c.valorCredito ? ' — limite ' + c.valorCredito.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : ''}`,
     situacaoDocs: { situacao: sd.situacao, faltam: sd.faltam, itens: sd.itens.map(i => ({ tipo: i.tipo, nome: i.nome, docId: i.doc?.id ?? null, status: i.doc?.status ?? 'faltando' })) },
     podeDecidir: PODE.decidir(req.user!), podeConferir: PODE.conferir(req.user!), podeTransferir: PODE.transferir(req.user!), limitado,
     // pendências "outra atendente também está atendendo": pra quem a gerência pode passar o cadastro
@@ -195,11 +210,18 @@ const DECISOES: Status[] = ['aprovado', 'aprovado_avalista', 'pendente_avalista'
 cadastrosRouter.post('/api/cadastros/:id/decisao', exigir(PODE.decidir, 'Só análise cadastral e diretoria decidem crédito'), async (req, res) => {
   const p = z.object({ status: z.enum(DECISOES as [Status, ...Status[]]), motivo: z.string().min(3) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Escolha a decisão e escreva o motivo' });
-  const c = await carregar(Number(req.params.id));
+  let c = await carregar(Number(req.params.id));
   if (!c) return res.status(404).end();
   if (!['analise_humana', 'pendente_avalista', 'reprovado', 'aprovado', 'aprovado_avalista'].includes(c.status))
     return res.status(409).json({ error: `Não dá pra decidir um cadastro em "${statusNome(c.status)}"` });
-  const novo = await mudarStatus(c, p.data.status, p.data.motivo, quem(req), { decididoPor: quem(req), decididoEm: new Date() });
+  const extra: Partial<typeof c> = { decididoPor: quem(req), decididoEm: new Date() };
+  if (p.data.status === 'aprovado_avalista') {
+    // o avalista que vale é o apresentado por último (aprovado ou em análise); a decisão aprova ele também
+    const av = await avalistaVigente(c.id);
+    if (!av) return res.status(409).json({ error: 'Nenhum avalista apresentado — inclua o avalista antes de aprovar com avalista' });
+    if (av.status !== 'aprovado') c = await decidirAvalista(c, av, 'aprovado', p.data.motivo + ' (decisão manual do cadastro)', quem(req));
+  } else if (p.data.status === 'aprovado') extra.avalistaId = null; // aprovado direto: não exige avalista
+  const novo = await mudarStatus(c, p.data.status, p.data.motivo, quem(req), extra);
   await registrarEvento(c.id, 'decisao_manual', `Decisão manual: ${statusNome(p.data.status)} — ${p.data.motivo}`, quem(req), { de: c.status, para: p.data.status, motivo: p.data.motivo });
   // decidiu → a pendência "Analisar cadastro" deixa de fazer sentido
   if (c.status === 'analise_humana') await db.update(pendencias).set({ resolvidaEm: new Date(), resolvidaPor: quem(req) })

@@ -29,7 +29,7 @@ export default function FormularioPublico() {
         {erro ? <Aviso titulo="Link inválido">{erro}. Fale com a sua consultora.</Aviso>
           : !info ? null
           : info.etapa === 'formulario' ? <Formulario token={token!} info={info} onOk={carregar} />
-          : info.etapa === 'avalista' ? <AvalistaForm token={token!} onOk={carregar} />
+          : info.etapa === 'avalista' ? <AvalistaForm token={token!} info={info} onOk={carregar} />
           : info.etapa === 'documentos' ? <Documentos token={token!} info={info} onOk={carregar} />
           : info.etapa === 'assinatura' ? <Assinatura info={info} />
           : info.etapa === 'inicializacao' ? <PrimeiraCarga info={info} />
@@ -67,7 +67,6 @@ function Formulario({ token, info, onOk }: { token: string; info: any; onOk: () 
     cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' })
   const [restricao, setRestricao] = useState<boolean | null>(null)
   const [temAvalista, setTemAvalista] = useState<boolean | null>(null)
-  const [av, setAv] = useState({ nome: '', cpf: '', dataNascimento: '', telefone: '' })
   const [modalidade, setModalidade] = useState<'presencial' | 'online' | ''>('')
   const [lgpd, setLgpd] = useState(false)
   const [enviando, setEnviando] = useState(false)
@@ -92,7 +91,7 @@ function Formulario({ token, info, onOk }: { token: string; info: any; onOk: () 
       await api('POST', `/publico/${token}/formulario`, {
         nome: f.nome, cpf: f.cpf, dataNascimento: f.dataNascimento, telefone: f.telefone, email: f.email || undefined,
         endereco: { cep: f.cep, rua: f.rua, numero: f.numero, complemento: f.complemento || undefined, bairro: f.bairro, cidade: f.cidade, uf: f.uf },
-        declarouRestricao: restricao, temAvalista, avalista: temAvalista ? av : undefined, modalidade, aceiteLgpd: true,
+        declarouRestricao: restricao, temAvalista, modalidade, aceiteLgpd: true,
       })
       onOk()
     } catch (er) { setMsg((er as Error).message) } finally { setEnviando(false) }
@@ -126,12 +125,7 @@ function Formulario({ token, info, onOk }: { token: string; info: any; onOk: () 
         <SimNao valor={restricao} onChange={setRestricao} />
         <label style={label}>Você tem alguém que pode ser seu avalista?</label>
         <SimNao valor={temAvalista} onChange={setTemAvalista} />
-        {temAvalista && <>
-          <label style={label}>Nome do avalista</label><input required value={av.nome} onChange={e => setAv({ ...av, nome: e.target.value })} style={input} />
-          <label style={label}>CPF do avalista</label><input required inputMode="numeric" value={av.cpf} onChange={e => setAv({ ...av, cpf: mascCpf(e.target.value) })} style={input} />
-          <label style={label}>Nascimento do avalista</label><input required type="date" value={av.dataNascimento} onChange={e => setAv({ ...av, dataNascimento: e.target.value })} style={input} />
-          <label style={label}>WhatsApp do avalista</label><input inputMode="tel" value={av.telefone} onChange={e => setAv({ ...av, telefone: mascTel(e.target.value) })} style={input} />
-        </>}
+        {temAvalista && <p style={{ fontSize: 13.5, color: '#85525f', margin: '8px 0 0' }}>Ótimo! Se o avalista for necessário, pedimos os dados dele aqui mesmo, depois da análise.</p>}
       </Caixa>
       <Caixa titulo="Como você prefere começar?">
         {([['presencial', 'Retirar na matriz (presencial)'], ['online', 'Receber pelos Correios (online)']] as const).map(([v, l]) => (
@@ -150,24 +144,81 @@ function Formulario({ token, info, onOk }: { token: string; info: any; onOk: () 
   )
 }
 
-function AvalistaForm({ token, onOk }: { token: string; onOk: () => void }) {
-  const [av, setAv] = useState({ nome: '', cpf: '', dataNascimento: '', telefone: '' })
+// Relatório 2, item 3: dados do avalista + vínculo + quiz próprio do avalista (configurável pela diretoria).
+function AvalistaForm({ token, info, onOk }: { token: string; info: any; onOk: () => void }) {
+  const cfg = info.avalista || { intro: '', parentescos: [], perguntas: [], tentativa: 1, max: 1, podeOutro: true }
+  const [av, setAv] = useState({ nome: '', cpf: '', dataNascimento: '', telefone: '', parentesco: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' })
+  const [resp, setResp] = useState<Record<string, string>>({})
+  const [enviando, setEnviando] = useState(false)
   const [msg, setMsg] = useState('')
+  const set = (k: keyof typeof av) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setAv({ ...av, [k]: e.target.value })
+  useEffect(() => {
+    const cep = av.cep.replace(/\D/g, '')
+    if (cep.length !== 8) return
+    fetch(`https://viacep.com.br/ws/${cep}/json/`).then(r => r.json()).then(j => {
+      if (!j.erro) setAv(x => ({ ...x, rua: x.rua || j.logradouro, bairro: x.bairro || j.bairro, cidade: j.localidade, uf: j.uf }))
+    }).catch(() => {})
+  }, [av.cep])
+  const visiveis = (cfg.perguntas as any[]).filter(p => !p.mostrarSe || p.mostrarSe.opcoes.includes(resp[p.mostrarSe.perguntaId]))
   const enviar = async (e: React.FormEvent) => {
     e.preventDefault()
-    try { await api('POST', `/publico/${token}/avalista`, av); onOk() } catch (er) { setMsg((er as Error).message) }
+    if (!av.parentesco) return setMsg('Escolha o vínculo do avalista com você.')
+    const falta = visiveis.find(p => !String(resp[p.id] || '').trim())
+    if (falta) return setMsg('Responda: ' + falta.texto)
+    setEnviando(true); setMsg('')
+    try {
+      await api('POST', `/publico/${token}/avalista`, {
+        nome: av.nome, cpf: av.cpf, dataNascimento: av.dataNascimento, telefone: av.telefone || undefined, parentesco: av.parentesco,
+        endereco: { cep: av.cep, rua: av.rua, numero: av.numero, complemento: av.complemento || undefined, bairro: av.bairro, cidade: av.cidade, uf: av.uf },
+        respostas: Object.fromEntries(visiveis.map(p => [p.id, resp[p.id]])),
+      })
+      onOk()
+    } catch (er) { setMsg((er as Error).message) } finally { setEnviando(false) }
   }
+  if (!cfg.podeOutro) return <Aviso titulo="Cadastro em análise">Sua consultora vai entrar em contato.</Aviso>
+  const opc = (sel: boolean): CSSProperties => ({ textAlign: 'left', width: '100%', minHeight: 44, padding: '10px 12px', borderRadius: 4, fontSize: 15, marginTop: 8, border: sel ? '2px solid #8e2a46' : '1px solid #C3C7CC', background: sel ? '#fbe9ee' : '#fff', color: '#4a2430' })
   return (
     <form onSubmit={enviar}>
-      <p style={{ color: '#4a2430', fontSize: 16, lineHeight: 1.5 }}>Para seguir com o seu cadastro, precisamos dos dados de um <b>avalista</b> (alguém que garanta o seu cadastro).</p>
+      {cfg.outro
+        ? <p style={{ color: '#4a2430', fontSize: 16, lineHeight: 1.5 }}>O avalista anterior não pôde ser aceito. Você pode indicar <b>outra pessoa</b> ({cfg.tentativa}º avalista de {cfg.max}).</p>
+        : <p style={{ color: '#4a2430', fontSize: 16, lineHeight: 1.5 }}>{cfg.intro}</p>}
       <Caixa titulo="Dados do avalista">
-        <label style={label}>Nome completo</label><input required value={av.nome} onChange={e => setAv({ ...av, nome: e.target.value })} style={input} />
-        <label style={label}>CPF</label><input required inputMode="numeric" value={av.cpf} onChange={e => setAv({ ...av, cpf: mascCpf(e.target.value) })} style={input} />
-        <label style={label}>Data de nascimento</label><input required type="date" value={av.dataNascimento} onChange={e => setAv({ ...av, dataNascimento: e.target.value })} style={input} />
-        <label style={label}>WhatsApp</label><input inputMode="tel" value={av.telefone} onChange={e => setAv({ ...av, telefone: mascTel(e.target.value) })} style={input} />
+        <label style={label}>Nome completo</label><input required value={av.nome} onChange={set('nome')} style={input} />
+        <label style={label}>CPF</label><input required inputMode="numeric" value={av.cpf} onChange={e => setAv({ ...av, cpf: mascCpf(e.target.value) })} style={input} placeholder="000.000.000-00" />
+        <label style={label}>Data de nascimento</label><input required type="date" value={av.dataNascimento} onChange={set('dataNascimento')} style={input} />
+        <label style={label}>WhatsApp</label><input required inputMode="tel" value={av.telefone} onChange={e => setAv({ ...av, telefone: mascTel(e.target.value) })} style={input} />
+        <label style={label}>O avalista é seu(sua)…</label>
+        <select required value={av.parentesco} onChange={set('parentesco')} style={input}>
+          <option value="">Escolha</option>
+          {cfg.parentescos.map((p: any) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+        </select>
       </Caixa>
+      <Caixa titulo="Endereço do avalista">
+        <label style={label}>CEP</label><input required inputMode="numeric" value={av.cep} onChange={e => setAv({ ...av, cep: mascCep(e.target.value) })} style={input} placeholder="00000-000" />
+        <label style={label}>Rua</label><input required value={av.rua} onChange={set('rua')} style={input} />
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}><label style={label}>Número</label><input required value={av.numero} onChange={set('numero')} style={input} /></div>
+          <div style={{ flex: 2 }}><label style={label}>Complemento</label><input value={av.complemento} onChange={set('complemento')} style={input} /></div>
+        </div>
+        <label style={label}>Bairro</label><input required value={av.bairro} onChange={set('bairro')} style={input} />
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 3 }}><label style={label}>Cidade</label><input required value={av.cidade} onChange={set('cidade')} style={input} /></div>
+          <div style={{ flex: 1 }}><label style={label}>UF</label><input required maxLength={2} value={av.uf} onChange={e => setAv({ ...av, uf: e.target.value.toUpperCase() })} style={input} /></div>
+        </div>
+      </Caixa>
+      {visiveis.length > 0 && <Caixa titulo="Sobre o avalista">
+        {visiveis.map((p: any) => (
+          <div key={p.id} style={{ marginTop: 6 }}>
+            <label style={label}>{p.texto}</label>
+            {p.ajuda && <div style={{ fontSize: 13, color: '#85525f', marginTop: -2 }}>{p.ajuda}</div>}
+            {p.tipo === 'texto'
+              ? <input value={resp[p.id] || ''} onChange={e => setResp({ ...resp, [p.id]: e.target.value })} style={input} />
+              : p.opcoes.map((o: any) => <button type="button" key={o.id} style={opc(resp[p.id] === o.id)} onClick={() => setResp({ ...resp, [p.id]: o.id })}>{o.emoji ? o.emoji + ' ' : ''}{o.texto}</button>)}
+          </div>))}
+      </Caixa>}
+      <p style={{ fontSize: 13, color: '#85525f', lineHeight: 1.45 }}>O avalista também passa por consulta de crédito e recebe um link para assinar o contrato junto com você.</p>
       {msg && <p style={{ color: '#b3261e', fontWeight: 700 }}>{msg}</p>}
-      <button style={botao}>Enviar avalista</button>
+      <button disabled={enviando} style={botao}>{enviando ? 'Enviando…' : 'Enviar avalista'}</button>
     </form>
   )
 }

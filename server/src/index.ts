@@ -16,6 +16,9 @@ import { jueriMockRouter } from './routes/jueriMock.js';
 import { consultasRouter } from './routes/consultas.js';
 import { distribuicaoRouter } from './routes/distribuicao.js';
 import { iniciarJueri } from './lib/jueri.js';
+import { avalistasRouter } from './routes/avalistas.js';
+import { migrarAvalistasLegados } from './lib/avalistas.js';
+import { carregarDocsConfig } from './lib/settings.js';
 
 process.on('unhandledRejection', err => console.error('Erro não tratado (servidor segue no ar):', err));
 
@@ -30,6 +33,7 @@ app.use(quizRouter);
 app.use(operacaoRouter);
 app.use(consultasRouter);
 app.use(distribuicaoRouter);
+app.use(avalistasRouter);
 app.use(publicoRouter);
 app.use(configRouter);
 app.use(cadastrosRouter);
@@ -41,6 +45,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 const port = Number(process.env.PORT) || 3013;
 await initDb();
 await garantirQuizzes(); // quiz único antigo vira o 1º da lista
+await carregarDocsConfig();
+await migrarAvalistasLegados(); // avalista antigo (campo único) vira o 1º avalista do cadastro
 await iniciarStorage();
 app.listen(port, () => {
   console.log('Clara Cadastros (API) em http://localhost:' + port);

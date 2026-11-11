@@ -39,6 +39,7 @@ configRouter.put('/api/config/regras', requireAuth, soDiretoria, async (req, res
       acaoAcimaLimite: acao, palavrasCredorSemijoias: z.array(z.string()), acaoCredorSemijoias: acao, acaoProtesto: acao,
       acaoNomeDivergente: acao, acaoAvalistaComRestricao: acao,
       validadeConsultaMeses: z.number().int().min(0).max(24),
+      scoreMinimo: z.number().int().min(0).max(1000).default(0), acaoScoreBaixo: acao.default('analise_humana'),
     }),
     prazos: z.record(z.number().min(0)),
     cenarios: z.record(z.enum(['nada_consta', 'negativacao_pequena', 'negativacao_media', 'negativacao_grande', 'credor_semijoias', 'protesto', 'nome_divergente'])),

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, CheckCircle2, Circle, Copy, ExternalLink, FileSignature, FileText, Plus, RefreshCw, XCircle } from 'lucide-react'
+import { ArrowLeft, Check, CheckCircle2, Circle, Copy, ExternalLink, FileSignature, FileText, FolderOpen, Plus, RefreshCw, XCircle } from 'lucide-react'
 import { api, arquivoUrl } from '../lib/api'
 import { ETAPA_INIC, FINAIS, SETORES, STATUS } from '../lib/status'
 import { brl, cpfFmt, dataBR, dataHoraBR, telFmt } from '../lib/fmt'
@@ -24,6 +24,8 @@ export default function CadastroDetalhe() {
   const [acaoInic, setAcaoInic] = useState<D | null>(null)
   const [transferir, setTransferir] = useState(false)
   const [iaRodando, setIaRodando] = useState<number | null>(null) // hooks sempre antes do "if (!d) return" (React #310)
+  const [incluirAv, setIncluirAv] = useState(false)
+  const [decAv, setDecAv] = useState<{ a: D; status: string } | null>(null)
   const carregar = () => api('GET', '/cadastros/' + id).then(setD)
   useEffect(() => { carregar() }, [id])
   // enquanto a análise automática roda, atualiza sozinho
@@ -31,7 +33,6 @@ export default function CadastroDetalhe() {
   if (!d) return <Carregando />
   const c = d.cadastro
   const e = c.endereco || {}
-  const av = c.avalista
   const encerrado = FINAIS.includes(c.status)
   const nomeResp = (uid: number | null) => d.equipe.find((u: D) => u.id === uid)?.name
 
@@ -57,7 +58,7 @@ export default function CadastroDetalhe() {
       <div style={{ background: '#fff', border: '1px solid var(--line)', borderLeft: `6px solid ${STATUS[c.status]?.cor || '#ccc'}`, borderRadius: 3, padding: '16px 18px', marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.codigo}{c.crmLeadId ? ` · lead ${c.crmLeadId} no CRM` : ''}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.codigo}{c.crmLeadId ? ` · lead ${c.crmLeadId} no CRM` : ''} · pasta: <b>{d.pasta}</b></div>
             <h1 style={{ margin: '2px 0 8px', fontSize: 24 }}>{c.nome}</h1>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <StatusPill status={c.status} inicEtapa={c.inicEtapa} grande />
@@ -119,32 +120,17 @@ export default function CadastroDetalhe() {
             ))}
           </Card>
 
-          <Card title="Documentos" right={<span style={{ fontSize: 12.5, color: d.situacaoDocs.situacao === 'completa' ? '#3c8d0d' : 'var(--muted)' }}>
+          <Card title="Documentos da candidata" right={<span style={{ fontSize: 12.5, color: d.situacaoDocs.situacao === 'completa' ? '#3c8d0d' : 'var(--muted)' }}>
             {d.situacaoDocs.situacao === 'completa' ? 'Tudo conferido' : d.situacaoDocs.situacao === 'em_conferencia' ? 'Aguardando conferência' : `Faltam ${d.situacaoDocs.faltam.length}`}</span>}>
             {!['aprovado', 'aprovado_avalista', 'documentos_ok'].includes(c.status) && !d.documentos.length
               ? <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>A cliente envia os documentos pelo mesmo link depois de aprovada.</p>
-              : d.situacaoDocs.itens.map((i: D) => {
-                const doc = d.documentos.find((x: D) => x.id === i.docId)
-                return (
-                  <div key={i.tipo} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px dashed var(--line)' }}>
-                    <FileText size={18} color="var(--muted)" style={{ flex: 'none' }} />
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 13.5 }}>
-                      <div style={{ fontWeight: 700 }}>{i.nome}</div>
-                      <div style={{ fontSize: 12, color: i.status === 'recusado' ? '#d93025' : 'var(--muted)' }}>
-                        {i.status === 'faltando' ? 'Não enviado' : i.status === 'enviado' ? 'Enviado — conferir' : i.status === 'conferido' ? `Conferido por ${doc?.conferidoPor}${doc?.dataEmissao ? ' · emitido em ' + dataBR(doc.dataEmissao) : ''}` : `Recusado: ${doc?.observacao}`}
-                      </div>
-                      {doc?.ia && <IaResumo ia={doc.ia} />}
-                    </div>
-                    {doc && d.podeConferir && <button title="Pedir pra IA ler este documento de novo" disabled={iaRodando === doc.id} style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => rodarIa(doc.id)}>{iaRodando === doc.id ? 'Lendo…' : 'IA'}</button>}
-                    {doc && !d.limitado && <a href={arquivoUrl(doc.id)} target="_blank" rel="noreferrer" style={btn('ghost', { minHeight: 30, padding: '0 10px' })}>Ver</a>}
-                    {doc?.status === 'enviado' && d.podeConferir && <button style={btn('primary', { minHeight: 30, padding: '0 10px' })} onClick={() => setConferir(doc)}>Conferir</button>}
-                  </div>
-                )
-              })}
-            {d.documentos.filter((x: D) => !d.situacaoDocs.itens.some((i: D) => i.docId === x.id)).length > 0 &&
+              : d.situacaoDocs.itens.filter((i: D) => !i.tipo.startsWith('avalista_')).map((i: D) =>
+                <DocLinha key={i.tipo} nome={i.nome} status={i.status} doc={d.documentos.find((x: D) => x.id === i.docId)} d={d} iaRodando={iaRodando} onIa={rodarIa} onConferir={setConferir} />)}
+            {d.situacaoDocs.itens.some((i: D) => i.tipo.startsWith('avalista_')) && <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '8px 0 0' }}>Os documentos do avalista ficam na pasta dele (cartão Avalistas).</p>}
+            {d.documentos.filter((x: D) => !x.tipo.startsWith('avalista_') && !d.situacaoDocs.itens.some((i: D) => i.docId === x.id)).length > 0 &&
               <details style={{ marginTop: 10, fontSize: 12.5 }}><summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Versões anteriores</summary>
-                {d.documentos.filter((x: D) => !d.situacaoDocs.itens.some((i: D) => i.docId === x.id)).map((x: D) => (
-                  <div key={x.id} style={{ padding: '4px 0' }}><a href={arquivoUrl(x.id)} target="_blank" rel="noreferrer">{x.nome}</a> — {x.status}{x.observacao ? `: ${x.observacao}` : ''} ({dataHoraBR(x.createdAt)})</div>
+                {d.documentos.filter((x: D) => !x.tipo.startsWith('avalista_') && !d.situacaoDocs.itens.some((i: D) => i.docId === x.id)).map((x: D) => (
+                  <div key={x.id} style={{ padding: '4px 0' }}>{d.limitado ? x.nome : <a href={arquivoUrl(x.id)} target="_blank" rel="noreferrer">{x.nome}</a>} — {x.status}{x.observacao ? `: ${x.observacao}` : ''} ({dataHoraBR(x.createdAt)})</div>
                 ))}
               </details>}
           </Card>
@@ -201,14 +187,7 @@ export default function CadastroDetalhe() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>{i.resposta}</span><span style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}>{i.pontos} pt</span></div>
               </div>))}
           </Card>}
-          <Card title="Avalista">
-            {!av?.nome ? <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>{c.temAvalista === false ? 'Sem avalista.' : 'Não informado.'}</p> : <>
-              <Field label="Nome" value={av.nome} />
-              <Field label="CPF" value={cpfFmt(av.cpf)} />
-              <Field label="Nascimento" value={dataBR(av.dataNascimento)} />
-              <Field label="Telefone" value={telFmt(av.telefone)} />
-            </>}
-          </Card>
+          <Avalistas d={d} iaRodando={iaRodando} onIa={rodarIa} onConferir={setConferir} onIncluir={() => setIncluirAv(true)} onDecidir={(a, status) => setDecAv({ a, status })} />
           <Card title="Histórico">
             <div style={{ maxHeight: 520, overflowY: 'auto' }}>
               {d.eventos.map((ev: D) => (
@@ -235,6 +214,8 @@ export default function CadastroDetalhe() {
       {verDocs && d.formalizacao && <VerDocumentos f={d.formalizacao} onClose={() => setVerDocs(false)} />}
       {refazer && <Refazer c={c} valor={d.formalizacao?.valor} onClose={() => setRefazer(false)} onOk={carregar} />}
       {acaoInic && <AcaoInic c={c} acao={acaoInic} onClose={() => setAcaoInic(null)} onOk={carregar} />}
+      {incluirAv && <IncluirAvalista c={c} onClose={() => setIncluirAv(false)} onOk={carregar} />}
+      {decAv && <DecidirAvalista a={decAv.a} status={decAv.status} onClose={() => setDecAv(null)} onOk={carregar} />}
     </div>
   )
 }
@@ -473,6 +454,151 @@ function Transferir({ equipe, atual, onClose, onOk }: { equipe: D[]; atual?: str
       </select>
       <label style={labelStyle}>Motivo (opcional)</label>
       <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Ex.: a Bia não deu sequência; a Natália retomou o contato" style={inputStyle} />
+    </Modal>
+  )
+}
+
+// ---------- Relatório 2, item 3: pasta de cada avalista dentro do cadastro ----------
+const COR_AV: Record<string, { bg: string; fg: string }> = {
+  aprovado: { bg: '#e3f6dc', fg: '#2f6f0b' }, reprovado: { bg: '#fdecea', fg: '#b3261e' },
+  em_analise: { bg: '#fff4d6', fg: '#8a5a00' }, substituido: { bg: '#eef0f2', fg: '#5b636b' },
+}
+const PODE_DECIDIR_AV = ['formulario_preenchido', 'pendente_avalista', 'analise_humana', 'aprovado_avalista', 'reprovado']
+
+function DocLinha({ nome, status, doc, d, iaRodando, onIa, onConferir }: { nome: string; status: string; doc?: D; d: D; iaRodando: number | null; onIa: (id: number) => void; onConferir: (doc: D) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px dashed var(--line)' }}>
+      <FileText size={18} color="var(--muted)" style={{ flex: 'none' }} />
+      <div style={{ flex: 1, minWidth: 0, fontSize: 13.5 }}>
+        <div style={{ fontWeight: 700 }}>{nome}</div>
+        <div style={{ fontSize: 12, color: status === 'recusado' ? '#d93025' : 'var(--muted)' }}>
+          {status === 'faltando' ? 'Não enviado' : status === 'enviado' ? 'Enviado — conferir' : status === 'conferido' ? `Conferido por ${doc?.conferidoPor}${doc?.dataEmissao ? ' · emitido em ' + dataBR(doc.dataEmissao) : ''}` : `Recusado: ${doc?.observacao}`}
+        </div>
+        {doc?.ia && <IaResumo ia={doc.ia} />}
+      </div>
+      {doc && d.podeConferir && <button title="Pedir pra IA ler este documento de novo" disabled={iaRodando === doc.id} style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => onIa(doc.id)}>{iaRodando === doc.id ? 'Lendo…' : 'IA'}</button>}
+      {doc && !d.limitado && <a href={arquivoUrl(doc.id)} target="_blank" rel="noreferrer" style={btn('ghost', { minHeight: 30, padding: '0 10px' })}>Ver</a>}
+      {doc?.status === 'enviado' && d.podeConferir && <button style={btn('primary', { minHeight: 30, padding: '0 10px' })} onClick={() => onConferir(doc)}>Conferir</button>}
+    </div>
+  )
+}
+
+function Avalistas({ d, iaRodando, onIa, onConferir, onIncluir, onDecidir }: { d: D; iaRodando: number | null; onIa: (id: number) => void; onConferir: (doc: D) => void; onIncluir: () => void; onDecidir: (a: D, status: string) => void }) {
+  const c = d.cadastro
+  const lista: D[] = d.avalistas || []
+  const podeIncluir = !d.limitado || d.cadastro.status === 'pendente_avalista'
+  const aguardando = ['pendente_avalista', 'analise_humana'].includes(c.status)
+  return (
+    <Card title={`Avalistas${lista.length ? ` (${lista.length} de ${d.avalistaTentativas.max})` : ''}`}
+      right={aguardando && podeIncluir && lista.length < d.avalistaTentativas.max && <button style={btn('ghost', { minHeight: 28, padding: '0 10px' })} onClick={onIncluir}><Plus size={14} /> Incluir</button>}>
+      {!lista.length ? <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>
+        {c.status === 'pendente_avalista' ? 'Aguardando a candidata informar o avalista pelo link (ou inclua aqui).' : c.temAvalista === false ? 'Sem avalista.' : 'Nenhum avalista apresentado.'}</p>
+        : lista.map(a => {
+          const cor = COR_AV[a.status] || COR_AV.substituido
+          const e = a.endereco || {}
+          // documentos do avalista que vale: usa a lista de exigidos (mostra também o que falta)
+          const itens = a.vigente ? d.situacaoDocs.itens.filter((i: D) => i.tipo.startsWith('avalista_')) : []
+          const soltos = a.documentos.filter((x: D) => !itens.some((i: D) => i.docId === x.id))
+          return (
+            <details key={a.id} open={a.vigente || a.status === 'em_analise'} style={{ border: `1px solid ${a.vigente ? '#9fd38a' : 'var(--line)'}`, borderRadius: 6, marginBottom: 10, background: a.vigente ? '#fbfff9' : '#fff' }}>
+              <summary style={{ cursor: 'pointer', padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', listStyle: 'none' }}>
+                <FolderOpen size={17} color={cor.fg} style={{ flex: 'none' }} />
+                <b style={{ fontSize: 14 }}>Avalista {a.ordem} — {a.nome}</b>
+                {a.parentescoNome && <span style={{ fontSize: 13, color: 'var(--muted)' }}>({a.parentescoNome})</span>}
+                <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', padding: '2px 8px', borderRadius: 3, background: cor.bg, color: cor.fg }}>
+                  {a.vigente ? '✓ Aprovado — vale para o cadastro' : a.statusNome}</span>
+              </summary>
+              <div style={{ padding: '0 12px 12px' }}>
+                {a.motivo && <div style={{ fontSize: 13, marginBottom: 6 }}><b>{a.status === 'aprovado' ? 'Resultado' : 'Motivo'}:</b> {a.motivo} <span style={{ color: 'var(--muted)' }}>— {a.decididoPor || 'automático'}{a.decididoEm ? ', ' + dataHoraBR(a.decididoEm) : ''}</span></div>}
+                <Field label="CPF" value={cpfFmt(a.cpf)} />
+                <Field label="Nascimento" value={dataBR(a.dataNascimento)} empty={!a.dataNascimento} />
+                <Field label="WhatsApp" value={telFmt(a.telefone)} empty={!a.telefone} />
+                {e.rua && <Field label="Endereço" value={`${e.rua}, ${e.numero}${e.complemento ? ' ' + e.complemento : ''} — ${e.bairro}, ${e.cidade}/${e.uf}`} />}
+                <Field label="Informado" value={`${dataHoraBR(a.createdAt)} · ${a.informadoPor || '—'}`} />
+                {a.checagens?.length > 0 && <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {a.checagens.map((k: D, i: number) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, fontSize: 13 }}>
+                      {k.ok ? <CheckCircle2 size={15} color="#3c8d0d" style={{ flex: 'none', marginTop: 2 }} /> : <XCircle size={15} color="#d93025" style={{ flex: 'none', marginTop: 2 }} />}
+                      <span><b>{String(k.regra).replace(/^Avalista \d+ — /, '')}:</b> {k.detalhe}</span>
+                    </div>))}
+                </div>}
+                {a.quiz?.itens?.length > 0 && <details style={{ marginTop: 8, fontSize: 13 }}><summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Quiz do avalista · {a.quiz.pontos} pontos</summary>
+                  {a.quiz.itens.map((i: D, k: number) => <div key={k} style={{ padding: '4px 0', borderBottom: '1px dashed var(--line)' }}><span style={{ color: 'var(--muted)' }}>{i.pergunta}</span> — {i.resposta} <span style={{ color: 'var(--muted)' }}>({i.pontos} pt)</span></div>)}
+                </details>}
+                {a.consultas.map((q: D) => (
+                  <div key={q.id} style={{ marginTop: 8, padding: 10, background: 'var(--card-2)', borderRadius: 3, fontSize: 12.5 }}>
+                    <b>SPC</b> · {dataHoraBR(q.createdAt)}{q.reaproveitadaDe ? ' · reaproveitada (sem custo)' : ''} — {q.resultado.situacao === 'nada_consta' ? <b style={{ color: '#3c8d0d' }}>nada consta</b>
+                      : <>restrições de <b>{brl(q.resultado.totalNegativado)}</b>{q.resultado.protestos?.length ? ' + protesto' : ''}</>}
+                    {q.resultado.score != null && <> · score {q.resultado.score}</>}
+                  </div>))}
+                {(itens.length > 0 || soltos.length > 0) && <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Documentos do avalista</div>
+                  {itens.map((i: D) => <DocLinha key={i.tipo} nome={i.nome.replace(/^Avalista — /, '')} status={i.status} doc={d.documentos.find((x: D) => x.id === i.docId)} d={d} iaRodando={iaRodando} onIa={onIa} onConferir={onConferir} />)}
+                  {soltos.map((x: D) => <DocLinha key={x.id} nome={x.nome.replace(/^Avalista — /, '') + ' (' + dataBR(x.createdAt) + ')'} status={x.status} doc={x} d={d} iaRodando={iaRodando} onIa={onIa} onConferir={onConferir} />)}
+                </div>}
+                {a.vigente && d.formalizacao && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Contrato e promissória: assinatura do avalista {d.formalizacao.assinaturas.find((s: D) => s.papel === 'avalista')?.assinadoEm ? 'feita ✓' : 'pendente'} (veja o cartão "Contrato e promissória").</div>}
+                {d.podeDecidir && a.status !== 'substituido' && PODE_DECIDIR_AV.includes(c.status) && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                    {a.status !== 'aprovado' && <button style={btn('soft', { minHeight: 30, padding: '0 10px' })} onClick={() => onDecidir(a, 'aprovado')}>Aprovar avalista</button>}
+                    {a.status !== 'reprovado' && <button style={btn('ghost', { minHeight: 30, padding: '0 10px' })} onClick={() => onDecidir(a, 'reprovado')}>Não aprovar</button>}
+                  </div>)}
+              </div>
+            </details>)
+        })}
+    </Card>
+  )
+}
+
+function DecidirAvalista({ a, status, onClose, onOk }: { a: D; status: string; onClose: () => void; onOk: () => void }) {
+  const [motivo, setMotivo] = useState('')
+  const salvar = async () => {
+    try { await api('POST', `/avalistas/${a.id}/decisao`, { status, motivo }); toast(status === 'aprovado' ? 'Avalista aprovado' : 'Avalista não aprovado'); onClose(); onOk() }
+    catch (e) { toast((e as Error).message, 'error') }
+  }
+  return (
+    <Modal title={`${status === 'aprovado' ? 'Aprovar' : 'Não aprovar'} o avalista ${a.ordem} — ${a.nome}`}
+      subtitle={status === 'aprovado' ? 'Ele passa a valer para o cadastro: os documentos dele são pedidos e ele assina o contrato junto.' : 'O histórico dele fica guardado. Se ainda houver tentativa, a candidata pode apresentar outro avalista.'}
+      onClose={onClose} footer={<><button style={btn('ghost')} onClick={onClose}>Cancelar</button><button style={btn(status === 'aprovado' ? 'primary' : 'danger')} disabled={motivo.trim().length < 3} onClick={salvar}>Registrar</button></>}>
+      <label style={labelStyle}>Motivo *</label>
+      <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={3} style={inputStyle} placeholder="Ex.: dívida do avalista já quitada, comprovante apresentado" />
+    </Modal>
+  )
+}
+
+function IncluirAvalista({ c, onClose, onOk }: { c: D; onClose: () => void; onOk: () => void }) {
+  const [cfg, setCfg] = useState<D>(null)
+  const [f, setF] = useState({ nome: '', cpf: '', dataNascimento: '', telefone: '', parentesco: '' })
+  const [resp, setResp] = useState<Record<string, string>>({})
+  const [salvando, setSalvando] = useState(false)
+  useEffect(() => { api('GET', '/config/avalista').then(r => setCfg(r.regras)) }, [])
+  const salvar = async () => {
+    setSalvando(true)
+    try {
+      const r = await api('POST', `/cadastros/${c.id}/avalistas`, { ...f, dataNascimento: f.dataNascimento || undefined, telefone: f.telefone || undefined, parentesco: f.parentesco || undefined, respostas: resp })
+      toast('Avalista incluído — resultado: ' + (STATUS[r.status]?.nome || r.status)); onClose(); onOk()
+    } catch (e) { toast((e as Error).message, 'error') } finally { setSalvando(false) }
+  }
+  const visiveis = (cfg?.perguntas || []).filter((p: D) => !p.mostrarSe || p.mostrarSe.opcoes.includes(resp[p.mostrarSe.perguntaId]))
+  return (
+    <Modal title="Incluir avalista" subtitle="Use quando a candidata passou os dados do avalista pelo WhatsApp. A análise roda na hora (requisitos e, se passar, o SPC)." width={600} onClose={onClose}
+      footer={<><button style={btn('ghost')} onClick={onClose}>Cancelar</button><button style={btn('primary')} disabled={salvando || f.nome.trim().length < 3 || f.cpf.replace(/\D/g, '').length !== 11} onClick={salvar}>{salvando ? 'Analisando…' : 'Incluir e analisar'}</button></>}>
+      <div className="grid2">
+        <div><label style={labelStyle}>Nome completo *</label><input value={f.nome} onChange={e => setF({ ...f, nome: e.target.value })} style={inputStyle} /></div>
+        <div><label style={labelStyle}>CPF *</label><input value={f.cpf} onChange={e => setF({ ...f, cpf: e.target.value })} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Nascimento</label><input type="date" value={f.dataNascimento} onChange={e => setF({ ...f, dataNascimento: e.target.value })} style={inputStyle} /></div>
+        <div><label style={labelStyle}>WhatsApp</label><input value={f.telefone} onChange={e => setF({ ...f, telefone: e.target.value })} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Vínculo com a candidata</label>
+          <select value={f.parentesco} onChange={e => setF({ ...f, parentesco: e.target.value })} style={inputStyle}>
+            <option value="">—</option>{cfg?.parentescos.map((p: D) => <option key={p.id} value={p.id}>{p.nome}{p.aceito ? '' : ' (não aceito)'}</option>)}
+          </select></div>
+      </div>
+      {visiveis.map((p: D) => (
+        <div key={p.id} style={{ marginTop: 10 }}>
+          <label style={labelStyle}>{p.texto}</label>
+          {p.tipo === 'texto' ? <input value={resp[p.id] || ''} onChange={e => setResp({ ...resp, [p.id]: e.target.value })} style={inputStyle} />
+            : <select value={resp[p.id] || ''} onChange={e => setResp({ ...resp, [p.id]: e.target.value })} style={inputStyle}>
+              <option value="">—</option>{p.opcoes.map((o: D) => <option key={o.id} value={o.id}>{o.texto}</option>)}</select>}
+        </div>))}
     </Modal>
   )
 }

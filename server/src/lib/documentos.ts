@@ -1,7 +1,8 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { cadastros, documentos } from '../db/schema.js';
-import { DOCS_AVALISTA, DOCS_TITULAR, DOC_NOME } from './status.js';
+import { DOC_NOME } from './status.js';
+import { docsConfig } from './settings.js';
 import { gravar } from './storage.js';
 
 type Cadastro = typeof cadastros.$inferSelect;
@@ -15,12 +16,21 @@ export async function salvarArquivo(cadastroId: number, buf: Buffer, nomeOrigina
   return rel;
 }
 
-export const docsExigidos = (c: Cadastro) => [...DOCS_TITULAR, ...(c.status === 'aprovado_avalista' || c.temAvalista && c.avalista?.cpf ? DOCS_AVALISTA : [])];
+/** Documentos obrigatórios (Regras → Documentos). Os do avalista só quando há avalista aprovado no cadastro. */
+export const docsExigidos = (c: Cadastro) => {
+  const cfg = docsConfig();
+  return [...cfg.titular, ...(c.avalistaId ? cfg.avalista : [])];
+};
+export const ehDocAvalista = (tipo: string) => tipo.startsWith('avalista_');
 
-/** Situação da documentação: o documento vale o último enviado de cada tipo. */
+/** Situação da documentação: o documento vale o último enviado de cada tipo. Documento de avalista
+ *  só conta se for do avalista que vale hoje (os do avalista recusado ficam na pasta dele). */
 export function situacaoDocs(c: Cadastro, docs: Documento[]) {
   const ultimo = new Map<string, Documento>();
-  for (const d of [...docs].sort((a, b) => a.id - b.id)) ultimo.set(d.tipo, d);
+  for (const d of [...docs].sort((a, b) => a.id - b.id)) {
+    if (ehDocAvalista(d.tipo) && d.avalistaId !== c.avalistaId) continue;
+    ultimo.set(d.tipo, d);
+  }
   const itens = docsExigidos(c).map(tipo => ({ tipo, nome: DOC_NOME[tipo], doc: ultimo.get(tipo) || null }));
   const faltam = itens.filter(i => !i.doc || i.doc.status === 'recusado');
   const aConferir = itens.filter(i => i.doc?.status === 'enviado');

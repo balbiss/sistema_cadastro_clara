@@ -18,7 +18,8 @@ const enderecoTexto = (c: Cadastro) => {
   const e = c.endereco || {};
   return e.rua ? `${e.rua}, ${e.numero}${e.complemento ? ' ' + e.complemento : ''} — ${e.bairro}, ${e.cidade}/${e.uf}` : '(endereço não informado)';
 };
-const temAvalista = (c: Cadastro) => !!c.avalista?.cpf && (c.status === 'aprovado_avalista' || !!c.temAvalista);
+// só o avalista APROVADO (o que vale pro cadastro) entra no contrato e assina
+const temAvalista = (c: Cadastro) => !!c.avalistaId && !!c.avalista?.cpf;
 
 function preencher(modelo: string, c: Cadastro, valor: number) {
   const av = temAvalista(c) ? c.avalista! : null;

@@ -40,7 +40,16 @@ export const DOC_NOME: Record<string, string> = {
   rg_frente: 'RG ou CNH — frente',
   rg_verso: 'RG ou CNH — verso',
   comprovante_residencia: 'Comprovante de residência',
+  comprovante_renda: 'Comprovante de renda',
+  selfie_documento: 'Selfie segurando o documento',
   avalista_rg_frente: 'Avalista — RG ou CNH (frente)',
   avalista_rg_verso: 'Avalista — RG ou CNH (verso)',
   avalista_comprovante_residencia: 'Avalista — comprovante de residência',
+  avalista_comprovante_renda: 'Avalista — comprovante de renda',
+  avalista_selfie_documento: 'Avalista — selfie segurando o documento',
+};
+/** Tipos que a diretoria pode marcar como obrigatórios (tela Regras → Documentos). */
+export const DOCS_POSSIVEIS = {
+  titular: ['rg_frente', 'rg_verso', 'comprovante_residencia', 'comprovante_renda', 'selfie_documento'],
+  avalista: ['avalista_rg_frente', 'avalista_rg_verso', 'avalista_comprovante_residencia', 'avalista_comprovante_renda', 'avalista_selfie_documento'],
 };

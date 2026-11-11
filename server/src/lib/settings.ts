@@ -19,6 +19,9 @@ export type Regras = {
   acaoAvalistaComRestricao: Acao;
   /** consulta ao SPC vale por esse tempo pro MESMO CPF (qualquer cadastro, qualquer colaboradora) */
   validadeConsultaMeses: number;
+  /** score mínimo da titular (0 = não olha o score) e o que fazer abaixo dele */
+  scoreMinimo: number;
+  acaoScoreBaixo: Acao;
 };
 
 // Ponto de partida até a Bel definir as regras de verdade (o briefing diz que ainda estão em definição).
@@ -37,7 +40,66 @@ export const REGRAS_PADRAO: Regras = {
   acaoNomeDivergente: 'analise_humana',
   acaoAvalistaComRestricao: 'reprovar',
   validadeConsultaMeses: 3,
+  scoreMinimo: 0,
+  acaoScoreBaixo: 'analise_humana',
 };
+
+// ---------- Avalista (relatório 2, item 3): quiz próprio + requisitos que a direção define ----------
+export type RegrasAvalista = {
+  maxAvalistas: number;          // tentativas por candidata (a Bel pediu 2)
+  idadeMinima: number;
+  idadeMaxima: number;           // 0 = sem limite
+  parentescos: { id: string; nome: string; aceito: boolean }[];
+  restricaoMaxima: number;       // total negativado aceito no avalista (0 = só "nada consta")
+  aceitarProtesto: boolean;
+  scoreMinimo: number;           // 0 = não olha o score
+  perguntas: QuizPergunta[];     // mesmo formato do quiz de perfil (pontos, elimina, condicional)
+  notaCorte: number;
+  acaoEsgotou: Acao;             // nenhum avalista aprovado e acabaram as tentativas
+  intro: string;                 // texto que a candidata lê antes de preencher
+};
+type QuizPergunta = import('./quiz.js').Pergunta;
+const pAv = (id: string, texto: string, opcoes: [string, string][]): QuizPergunta =>
+  ({ id, texto, tipo: 'escolha', opcoes: opcoes.map(([oid, t]) => ({ id: oid, texto: t, pontos: 0 })) });
+// Ponto de partida: aceita qualquer parentesco e as perguntas não valem ponto (a direção ainda define as regras —
+// "os requisitos que ainda não foram definidos pela direção não deverão ser presumidos").
+export const REGRAS_AVALISTA_PADRAO: RegrasAvalista = {
+  maxAvalistas: 2,
+  idadeMinima: 18,
+  idadeMaxima: 0,
+  parentescos: [
+    ['mae', 'Mãe'], ['pai', 'Pai'], ['conjuge', 'Marido / esposa / companheiro(a)'], ['filho', 'Filho(a)'], ['irmao', 'Irmão / irmã'],
+    ['avo', 'Avô / avó'], ['tio', 'Tio(a)'], ['sogro', 'Sogro(a)'], ['primo', 'Primo(a)'], ['amigo', 'Amigo(a)'], ['outro', 'Outro'],
+  ].map(([id, nome]) => ({ id, nome, aceito: true })),
+  restricaoMaxima: 0,
+  aceitarProtesto: false,
+  scoreMinimo: 0,
+  perguntas: [
+    pAv('trabalho', 'Qual a situação de trabalho do avalista?', [['clt', 'Registrado (CLT)'], ['servidor', 'Servidor público'], ['aposentado', 'Aposentado / pensionista'], ['empresario', 'Empresário (CNPJ)'], ['autonomo', 'Autônomo'], ['sem', 'Sem renda no momento']]),
+    pAv('moradia', 'O avalista mora em casa própria?', [['propria', 'Sim, própria'], ['alugada', 'Alugada'], ['cedida', 'Mora com familiares / cedida']]),
+  ],
+  notaCorte: 0,
+  acaoEsgotou: 'reprovar',
+  intro: 'Para seguir com o seu cadastro, precisamos de um avalista — alguém de confiança que garanta o seu cadastro. Preencha os dados dele abaixo.',
+};
+export const getRegrasAvalista = async (): Promise<RegrasAvalista> => {
+  const r = await getSetting<Partial<RegrasAvalista>>('regras_avalista', {});
+  return { ...REGRAS_AVALISTA_PADRAO, ...r };
+};
+
+// ---------- Documentos obrigatórios (relatório 2, item 7: "exigências para liberação do cadastro") ----------
+export type DocsExigidos = { titular: string[]; avalista: string[] };
+export const DOCS_EXIGIDOS_PADRAO: DocsExigidos = {
+  titular: ['rg_frente', 'rg_verso', 'comprovante_residencia'],
+  avalista: ['avalista_rg_frente', 'avalista_rg_verso', 'avalista_comprovante_residencia'],
+};
+// fica em memória (situacaoDocs é síncrona e roda em muitos lugares); recarrega no boot e ao salvar
+let docsCache: DocsExigidos = DOCS_EXIGIDOS_PADRAO;
+export const docsConfig = () => docsCache;
+export async function carregarDocsConfig() {
+  docsCache = await getSetting<DocsExigidos>('documentos_exigidos', DOCS_EXIGIDOS_PADRAO);
+  return docsCache;
+}
 
 // Prazo de cada etapa em horas (item 3/10 do briefing). Passou do prazo = pendência vencida.
 export type Prazos = Record<string, number>;

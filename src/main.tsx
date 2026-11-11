@@ -10,6 +10,7 @@ import Cadastros from './pages/Cadastros'
 import CadastroDetalhe from './pages/CadastroDetalhe'
 import Pendencias from './pages/Pendencias'
 import Regras from './pages/Regras'
+import RegrasAvalista from './pages/RegrasAvalista'
 import Integracao from './pages/Integracao'
 import Usuarios from './pages/Usuarios'
 import FormularioPublico from './pages/FormularioPublico'
@@ -46,6 +47,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/pendencias" element={<Pendencias />} />
           <Route path="/modelos" element={<Modelos />} />
           <Route path="/regras" element={<Regras />} />
+          <Route path="/regras-avalista" element={<RegrasAvalista />} />
           <Route path="/relatorios" element={<Relatorios />} />
           <Route path="/consultas-spc" element={<ConsultasSpc />} />
           <Route path="/links" element={<Distribuicao />} />

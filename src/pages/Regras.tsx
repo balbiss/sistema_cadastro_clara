@@ -71,7 +71,9 @@ export default function Regras() {
               <label style={labelStyle}>Palavras que identificam credor de semijoias (separe por vírgula)</label>
               <input disabled={!pode} value={r.palavrasCredorSemijoias.join(', ')} onChange={e => setR('palavrasCredorSemijoias', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} style={inputStyle} />
             </div>
-            {linha('Avalista com restrição', acao('acaoAvalistaComRestricao'))}
+            {linha('Score mínimo da candidata', num('scoreMinimo', 90), '0 = não olha o score. Abaixo do mínimo: ação ao lado')}
+            {linha('Score abaixo do mínimo', acao('acaoScoreBaixo'))}
+            <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '10px 0 0' }}>Regras do avalista (idade, vínculo, restrição, quiz) ficam em <a href="/regras-avalista">Avalista e documentos</a>.</p>
           </Card>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

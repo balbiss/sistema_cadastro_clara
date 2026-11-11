@@ -13,6 +13,9 @@ import { avancar } from '../lib/liberacao.js';
 import { nomeEtapaInic } from '../lib/inicializacao.js';
 import { soDigitos } from '../lib/util.js';
 import { conferirComIa, fecharPendenciaReenvio } from '../lib/ia.js';
+import { apresentarAvalista, ErroAvalista, formularioAvalistaPublico, tentativas } from '../lib/avalistas.js';
+import { getRegrasAvalista } from '../lib/settings.js';
+import { ehDocAvalista } from '../lib/documentos.js';
 
 // Formulário que a cliente abre pelo link (sem login). O mesmo link serve pra tudo:
 // preencher → completar avalista (se pedirem) → mandar documentos (depois de aprovada).
@@ -45,6 +48,11 @@ publicoRouter.get('/api/publico/:token', async (req, res) => {
   res.json({
     etapa: etapaCliente(c.status), nome: c.nome, telefone: c.telefone, email: c.email, cpf: c.cpf, consultora: c.consultoraNome,
     modalidade: c.modalidade,
+    // relatório 2, item 3: quiz do avalista (sem pontos) e em qual tentativa ela está — nunca o motivo da recusa
+    avalista: c.status === 'pendente_avalista' ? await (async () => {
+      const t = await tentativas(c.id);
+      return { ...formularioAvalistaPublico(await getRegrasAvalista()), tentativa: t.usadas + 1, max: t.max, outro: t.usadas > 0, podeOutro: t.podeOutro };
+    })() : null,
     assinatura: await (async () => {
       if (c.status !== 'aguardando_assinatura') return null;
       const f = await formalizacaoAtual(c.id);
@@ -69,7 +77,8 @@ publicoRouter.post('/api/publico/:token/iniciar', async (req, res) => {
 });
 
 const endereco = z.object({ cep: z.string(), rua: z.string(), numero: z.string(), complemento: z.string().optional(), bairro: z.string(), cidade: z.string(), uf: z.string() });
-const avalista = z.object({ nome: z.string().min(3), cpf: z.string(), telefone: z.string().optional(), dataNascimento: z.string(), endereco: endereco.partial().optional() });
+const avalista = z.object({ nome: z.string().min(3), cpf: z.string(), telefone: z.string().optional(), dataNascimento: z.string(), endereco: endereco.partial().optional(),
+  parentesco: z.string().optional(), respostas: z.record(z.string()).optional() });
 
 const formulario = z.object({
   nome: z.string().min(3), cpf: z.string(), dataNascimento: z.string(), telefone: z.string(), email: z.string().optional(),
@@ -105,13 +114,11 @@ publicoRouter.post('/api/publico/:token/avalista', async (req, res) => {
   if (c.status !== 'pendente_avalista') return res.status(409).json({ error: 'Não estamos aguardando avalista neste cadastro' });
   const p = avalista.safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Confira os dados do avalista', detalhes: p.error.flatten() });
-  await registrarEvento(c.id, 'avalista_informado', `Avalista informado: ${p.data.nome}`, CLIENTE, { avalista: { ...p.data, cpf: soDigitos(p.data.cpf) } });
-  // a pendência "conseguir avalista" foi cumprida (senão trava a liberação lá na frente)
-  const fechadas = await db.update(pendencias).set({ resolvidaEm: new Date(), resolvidaPor: CLIENTE })
-    .where(and(eq(pendencias.cadastroId, c.id), isNull(pendencias.resolvidaEm), ilike(pendencias.descricao, 'Conseguir avalista%'))).returning();
-  for (const f of fechadas) await registrarEvento(c.id, 'pendencia_resolvida', 'Pendência resolvida: ' + f.descricao, CLIENTE, { pendencia_id: f.id });
-  const comAvalista = await mudarStatus(c, 'formulario_preenchido', 'Avalista informado — reanalisando', CLIENTE,
-    { temAvalista: true, avalista: { ...p.data, cpf: soDigitos(p.data.cpf) } });
+  let av;
+  try { av = await apresentarAvalista(c, p.data, CLIENTE); }
+  catch (e) { if (e instanceof ErroAvalista) return res.status(409).json({ error: e.message }); throw e; }
+  const [atual] = await db.select().from(cadastros).where(eq(cadastros.id, c.id));
+  const comAvalista = await mudarStatus(atual, 'formulario_preenchido', `${av.ordem}º avalista informado — analisando`, CLIENTE);
   res.json({ ok: true });
   analisar(comAvalista).catch(err => console.error('Análise falhou para', c.codigo, err));
 });
@@ -122,9 +129,10 @@ publicoRouter.post('/api/publico/:token/documentos', upload.single('arquivo'), a
   if (!['aprovado', 'aprovado_avalista'].includes(c.status)) return res.status(409).json({ error: 'Ainda não é hora de enviar documentos' });
   const tipo = String(req.body.tipo || '');
   if (!DOC_NOME[tipo] || !req.file) return res.status(400).json({ error: 'Arquivo ou tipo de documento inválido' });
+  if (ehDocAvalista(tipo) && !c.avalistaId) return res.status(400).json({ error: 'Este cadastro não tem avalista aprovado' });
   if (!/^(image\/|application\/pdf)/.test(req.file.mimetype)) return res.status(400).json({ error: 'Envie foto ou PDF' });
   const arquivo = await salvarArquivo(c.id, req.file.buffer, req.file.originalname, req.file.mimetype);
-  const [novoDoc] = await db.insert(documentos).values({ cadastroId: c.id, tipo, arquivo, nomeOriginal: req.file.originalname, mime: req.file.mimetype, tamanho: req.file.size }).returning();
+  const [novoDoc] = await db.insert(documentos).values({ cadastroId: c.id, tipo, arquivo, avalistaId: ehDocAvalista(tipo) ? c.avalistaId : null, nomeOriginal: req.file.originalname, mime: req.file.mimetype, tamanho: req.file.size }).returning();
   await fecharPendenciaReenvio(c.id, tipo, CLIENTE);
   await registrarEvento(c.id, 'documento_enviado', `Documento enviado: ${DOC_NOME[tipo]}`, CLIENTE, { tipo });
   const docs = await db.select().from(documentos).where(eq(documentos.cadastroId, c.id));
